@@ -1,0 +1,207 @@
+import { escapeHtml } from '../utils/dom.js';
+import { formatCurrency, formatPercent, labelForHealth } from '../utils/format.js';
+
+const WEIGHT_PRESETS = [
+  { label: 'Principal', value: 40 },
+  { label: 'Importante', value: 25 },
+  { label: 'Normal', value: 15 },
+  { label: 'Bajo', value: 7 },
+  { label: 'Exploratorio', value: 3 },
+];
+
+export function renderScenarioDetailView(root, ctx) {
+  const r = ctx.calculatedScenario;
+  if (!ctx.activeScenario) {
+    root.innerHTML = '<section class="empty-state"><h2>Sin escenario seleccionado</h2><p>Crea o selecciona un escenario.</p></section>';
+    return;
+  }
+  const netProfitPct = r.operatingRevenue ? r.netProfit / r.operatingRevenue : 0;
+  root.innerHTML = `
+    <section class="view-head"><div><p class="eyebrow">Detalle de escenario</p><h2>${escapeHtml(ctx.activeScenario.name)}</h2></div><div class="actions"><button class="btn btn-primary" id="newItem" ${ctx.canWrite ? '' : 'disabled'}>Agregar servicio</button></div></section>
+    <section class="reading healthy"><p>Pago docente: ${ctx.bundle.settings.teacherPaymentStrategy === 'payroll' ? 'cubierto por nomina fija' : 'por servicio/clase'}.</p></section>
+    ${distributionPanel(ctx)}
+    <section class="kpi-grid">
+      <article class="metric-card"><span>Ingresos cobrados/proyectados</span><strong>${formatCurrency(r.grossRevenue)}</strong></article>
+      <article class="metric-card"><span>IVA estimado</span><strong>${formatCurrency(r.vatAmount)}</strong></article>
+      <article class="metric-card"><span>Ingresos operativos sin IVA</span><strong>${formatCurrency(r.operatingRevenue)}</strong></article>
+      <article class="metric-card"><span>Costos variables</span><strong>${formatCurrency(r.totalVariableCosts)}</strong></article>
+      <article class="metric-card"><span>Retencion estimada</span><strong>${formatCurrency(r.totalWithholdingAmount)}</strong></article>
+      <article class="metric-card"><span>Margen contribucion</span><strong>${formatCurrency(r.totalContributionMargin)}</strong><small>${formatPercent(r.contributionMarginPct)}</small></article>
+      <article class="metric-card"><span>Total costos fijos mensuales</span><strong>${formatCurrency(r.totalFixedCosts)}</strong></article>
+      <article class="metric-card"><span>Utilidad antes de impuesto sobre utilidad</span><strong>${formatCurrency(r.operatingProfitBeforeIncomeTax)}</strong></article>
+      <article class="metric-card"><span>Impuesto sobre utilidad</span><strong>${formatCurrency(r.incomeTax)}</strong></article>
+      <article class="metric-card"><span>Utilidad neta</span><strong>${formatCurrency(r.netProfit)}</strong><small>${formatPercent(netProfitPct)}</small></article>
+      <article class="metric-card"><span>Equilibrio clases</span><strong>${r.breakEvenClasses == null ? 'Inviable' : Math.ceil(r.breakEvenClasses)}</strong></article>
+    </section>
+    <section class="panel table-wrap"><table>
+      <thead><tr><th>Servicio</th><th>Prioridad</th><th class="num">Peso %</th><th class="num">Clases dictadas</th><th class="num">Paquetes / suscripciones</th><th class="num">Unidades / personas</th><th class="num">Estudiantes/grupo</th><th class="num">Precio usado</th><th class="num">Ingreso operativo</th><th class="num">Retencion</th><th class="num">Costo variable</th><th class="num">Margen mensual</th><th class="num">Margen %</th><th>Alertas</th><th></th></tr></thead>
+      <tbody>${r.rows.map((row) => itemRow(row)).join('')}</tbody>
+    </table></section>`;
+  document.querySelector('#newItem')?.addEventListener('click', () => ctx.actions.scenarioItemForm());
+  bindDistributionPanel(ctx);
+  document.querySelectorAll('[data-edit-item]').forEach((b) => b.addEventListener('click', () => ctx.actions.scenarioItemForm(ctx.scenarioItems.find((i) => i.id === b.dataset.editItem))));
+  document.querySelectorAll('[data-del-item]').forEach((b) => b.addEventListener('click', () => ctx.actions.deleteScenarioItem(ctx.scenarioItems.find((i) => i.id === b.dataset.delItem))));
+  document.querySelectorAll('[data-weight-item]').forEach((input) => {
+    input.addEventListener('change', () => ctx.actions.updateScenarioItemWeight(ctx.scenarioItems.find((i) => i.id === input.dataset.weightItem), input.value));
+  });
+  document.querySelectorAll('[data-weight-preset]').forEach((select) => {
+    select.addEventListener('change', () => {
+      const item = ctx.scenarioItems.find((i) => i.id === select.dataset.weightPreset);
+      const input = document.querySelector(`[data-weight-item="${select.dataset.weightPreset}"]`);
+      if (input) input.value = select.value;
+      ctx.actions.updateScenarioItemWeight(item, select.value);
+    });
+  });
+}
+
+function itemRow(row) {
+  const isSubscription = row.metrics.pricingModel === 'monthly_subscription';
+  const units = isSubscription ? row.totalSubscriptions : row.item.expectedPackagesPerMonth || 0;
+  const priceUsed = isSubscription
+    ? row.metrics.revenuePerSubscription
+    : row.item.autoGenerated && row.item.expectedPackagesPerMonth
+    ? row.grossRevenue / row.item.expectedPackagesPerMonth
+    : row.metrics.pricingModel === 'package' ? row.metrics.revenuePerPackage : row.metrics.revenuePerClass;
+  return `<tr><td><strong>${escapeHtml(row.service.name)}</strong><br><span class="badge ${row.metrics.healthStatus}">${labelForHealth(row.metrics.healthStatus)}</span>${row.item.autoGenerated ? '<br><span class="badge">Auto</span>' : ''}</td><td>${weightPresetSelect(row.item)}</td><td class="num"><input class="table-input" type="number" step="any" value="${escapeHtml(row.item.weightPct ?? 0)}" data-weight-item="${row.item.id}"></td><td class="num">${row.totalClasses || 0}</td><td class="num">${units || 0}</td><td class="num">${row.estimatedPeopleServed || 0}</td><td class="num">${isSubscription ? '-' : row.metrics.expectedStudentsPerGroup}</td><td class="num">${formatCurrency(priceUsed)}</td><td class="num">${formatCurrency(row.revenue)}</td><td class="num">${formatCurrency(row.withholdingAmount)}</td><td class="num">${formatCurrency(row.variableCosts)}</td><td class="num">${formatCurrency(row.contributionMargin)}</td><td class="num">${formatPercent(row.contributionMarginPct)}</td><td><div class="alerts">${row.alerts.slice(0, 3).map((a) => `<span>${escapeHtml(a)}</span>`).join('')}</div></td><td class="nowrap"><button class="btn btn-ghost" data-edit-item="${row.item.id}">Editar</button><button class="btn btn-ghost" data-del-item="${row.item.id}">Quitar</button></td></tr>`;
+}
+
+function weightPresetSelect(item) {
+  const current = Number(item.weightPct) || 0;
+  const matched = WEIGHT_PRESETS.some((preset) => Math.abs(preset.value - current) < 0.01);
+  return `<select class="table-select" data-weight-preset="${escapeHtml(item.id)}">
+    <option value="${escapeHtml(String(current))}" ${matched ? '' : 'selected'}>Manual</option>
+    ${WEIGHT_PRESETS.map((preset) => `<option value="${preset.value}" ${matched && preset.value === current ? 'selected' : ''}>${escapeHtml(preset.label)}</option>`).join('')}
+  </select>`;
+}
+
+function distributionPanel(ctx) {
+  const scenario = ctx.activeScenario;
+  const preview = ctx.distributionPreview;
+  const mode = scenario.autoDistributionEnabled && scenario.distributionMode === 'weighted_by_students' ? 'weighted_by_students' : 'manual';
+  const selectedCategory = String(scenario.focusCategory || '').trim();
+  return `<section class="panel distribution-panel">
+    <div class="distribution-head">
+      <div>
+        <h3>Distribucion asistida</h3>
+        <p class="muted">Define cuantas personas quieres atender y que prioridad debe tener cada servicio. Puedes usar nombres como Principal o Normal y ajustar el porcentaje manual si hace falta.</p>
+      </div>
+      <span class="badge ${mode === 'weighted_by_students' ? 'healthy' : 'off'}">${mode === 'weighted_by_students' ? 'Activa' : 'Manual'}</span>
+    </div>
+    <div class="distribution-controls">
+      <label class="field"><span>Modo de escenario</span><select id="distributionMode" ${ctx.canWrite ? '' : 'disabled'}><option value="manual" ${mode === 'manual' ? 'selected' : ''}>Manual</option><option value="weighted_by_students" ${mode === 'weighted_by_students' ? 'selected' : ''}>Automatico por estudiantes objetivo</option></select></label>
+      <label class="field"><span>Estudiantes/personas objetivo</span><input id="targetStudents" type="number" step="1" min="0" value="${escapeHtml(scenario.targetStudents ?? 0)}" ${ctx.canWrite ? '' : 'disabled'}></label>
+      <label class="field"><span>Categoria con mas peso</span><select id="focusCategory" ${ctx.canWrite ? '' : 'disabled'}>${categoryOptions(ctx).map((category) => `<option value="${escapeHtml(category)}" ${String(category).trim() === selectedCategory ? 'selected' : ''}>${escapeHtml(category)}</option>`).join('')}</select></label>
+      <div class="actions distribution-actions">
+        <button class="btn btn-secondary" id="calculateDistribution" ${ctx.canWrite ? '' : 'disabled'}>Calcular distribucion</button>
+        <button class="btn btn-secondary" id="equalizeDistribution" ${ctx.canWrite && ctx.scenarioItems?.length ? '' : 'disabled'}>Repartir pesos iguales</button>
+        <button class="btn btn-secondary" id="categoryDistribution" ${ctx.canWrite && ctx.scenarioItems?.length ? '' : 'disabled'}>Priorizar categoria</button>
+        <button class="btn btn-primary" id="applyDistribution" ${ctx.canWrite && preview?.rows?.length ? '' : 'disabled'}>Aplicar al escenario</button>
+        <button class="btn btn-ghost" id="disableDistribution" ${ctx.canWrite ? '' : 'disabled'}>Desactivar distribucion asistida</button>
+      </div>
+    </div>
+    ${previewBlock(preview)}
+  </section>`;
+}
+
+function categoryOptions(ctx) {
+  const servicesById = new Map(ctx.bundle.services.map((service) => [service.id, service]));
+  const categories = ctx.scenarioItems
+    .map((item) => {
+      const service = servicesById.get(item.serviceId);
+      return (service?.lineName || service?.modality || 'Sin categoria').trim();
+    })
+    .filter(Boolean);
+  if (ctx.activeScenario?.focusCategory) {
+    categories.push(String(ctx.activeScenario.focusCategory).trim());
+  }
+  return [...new Set(categories)].sort((a, b) => a.localeCompare(b, 'es'));
+}
+
+function previewBlock(preview) {
+  if (!preview) return '';
+  const rows = sortedPreviewRows(preview.rows, 'name_asc');
+  return `<div class="distribution-preview">
+    <div class="distribution-summary">
+      <article><span>Personas objetivo</span><strong>${preview.targetStudents}</strong></article>
+      <article><span>Personas estimadas</span><strong>${preview.estimatedPeople}</strong><small>Diferencia: ${preview.difference}</small></article>
+      <article><span>Ingresos estimados</span><strong>${formatCurrency(preview.revenue)}</strong></article>
+      <article><span>Margen estimado</span><strong>${formatCurrency(preview.contributionMargin)}</strong><small>${formatPercent(preview.contributionMarginPct)}</small></article>
+      <article><span>Clases dictadas</span><strong>${preview.deliveredClasses}</strong></article>
+    </div>
+    <div class="alerts">${preview.alerts.map((alert) => `<span>${escapeHtml(alert)}</span>`).join('')}</div>
+    <div class="distribution-tools">
+      <label class="field"><span>Ordenar vista previa por</span><select id="distributionPreviewSort">
+        <option value="name_asc">Nombre A-Z</option>
+        <option value="name_desc">Nombre Z-A</option>
+        <option value="revenue_desc">Ingresos mayores</option>
+        <option value="margin_desc">Margen mayor</option>
+        <option value="classes_desc">Mas clases</option>
+        <option value="people_desc">Mas personas</option>
+        <option value="weight_desc">Peso mayor</option>
+      </select></label>
+    </div>
+    <div class="table-wrap distribution-table"><table>
+      <thead><tr><th>Servicio</th><th class="num">Peso normalizado</th><th class="num">Personas asignadas</th><th class="num">Paquetes/suscripciones</th><th class="num">Clases</th><th class="num">Ingresos</th><th class="num">Costo variable</th><th class="num">Margen</th></tr></thead>
+      <tbody>${rows.map(previewRow).join('')}</tbody>
+    </table></div>
+  </div>`;
+}
+
+function bindDistributionPanel(ctx) {
+  function readDistributionForm() {
+    return {
+      mode: document.querySelector('#distributionMode')?.value || 'manual',
+      targetStudents: document.querySelector('#targetStudents')?.value || 0,
+      focusCategory: document.querySelector('#focusCategory')?.value || '',
+    };
+  }
+
+  document.querySelector('#calculateDistribution')?.addEventListener('click', () => {
+    const values = readDistributionForm();
+    ctx.actions.updateScenarioDistribution(values);
+  });
+  document.querySelector('#applyDistribution')?.addEventListener('click', () => {
+    const values = readDistributionForm();
+    ctx.actions.applyScenarioDistribution(values.targetStudents, values.focusCategory);
+  });
+  document.querySelector('#equalizeDistribution')?.addEventListener('click', () => {
+    const values = readDistributionForm();
+    ctx.actions.equalizeScenarioDistribution(values.targetStudents);
+  });
+  document.querySelector('#categoryDistribution')?.addEventListener('click', () => {
+    const values = readDistributionForm();
+    ctx.actions.weightScenarioByCategory(values.targetStudents, values.focusCategory);
+  });
+  document.querySelector('#disableDistribution')?.addEventListener('click', () => {
+    const values = readDistributionForm();
+    ctx.actions.updateScenarioDistribution({ mode: 'manual', targetStudents: values.targetStudents, focusCategory: values.focusCategory });
+  });
+  document.querySelector('#distributionPreviewSort')?.addEventListener('change', (event) => sortPreviewTable(ctx.distributionPreview?.rows || [], event.target.value));
+}
+
+function previewRow(row) {
+  return `<tr><td>${escapeHtml(row.service.name)}</td><td class="num">${formatPercent(row.normalizedWeightPct / 100)}</td><td class="num">${Math.round(row.assignedStudents)}</td><td class="num">${row.generatedSubscribersPerMonth || row.generatedPackagesPerMonth || row.generatedGroupsPerMonth || 0}</td><td class="num">${row.generatedClassesPerMonth}</td><td class="num">${formatCurrency(row.revenue)}</td><td class="num">${formatCurrency(row.variableCosts)}</td><td class="num">${formatCurrency(row.contributionMargin)}</td></tr>`;
+}
+
+function sortPreviewTable(rows, sortKey) {
+  const body = document.querySelector('.distribution-table tbody');
+  if (!body) return;
+  body.innerHTML = sortedPreviewRows(rows, sortKey).map(previewRow).join('');
+}
+
+function sortedPreviewRows(rows = [], sortKey = 'name_asc') {
+  const collator = new Intl.Collator('es', { sensitivity: 'base', numeric: true });
+  const sorted = [...rows];
+  const byName = (a, b) => collator.compare(a.service.name || '', b.service.name || '');
+  const byNumber = (key) => (a, b) => (Number(b[key]) || 0) - (Number(a[key]) || 0);
+  const sorters = {
+    name_asc: byName,
+    name_desc: (a, b) => byName(b, a),
+    revenue_desc: byNumber('revenue'),
+    margin_desc: byNumber('contributionMargin'),
+    classes_desc: byNumber('generatedClassesPerMonth'),
+    people_desc: byNumber('generatedStudents'),
+    weight_desc: byNumber('normalizedWeightPct'),
+  };
+  return sorted.sort(sorters[sortKey] || byName);
+}
