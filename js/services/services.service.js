@@ -1,6 +1,6 @@
 import { collection, doc, getDocs, query, where, writeBatch } from 'https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js';
 import { DEFAULT_PLAN_ID, planPath } from '../config/app.config.js';
-import { createIn, planCollection, removeAt, updateAt } from './firestore.service.js';
+import { createIn, planCollection, updateAt } from './firestore.service.js';
 import { writeAuditLog } from './audit.service.js';
 import { getFirebase } from './firebase.service.js';
 

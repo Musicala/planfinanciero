@@ -19,6 +19,13 @@ import { renderFixedCostsView } from './js/ui/fixed-costs.ui.js';
 import { renderScenariosView } from './js/ui/scenarios.ui.js';
 import { renderScenarioDetailView } from './js/ui/scenario-detail.ui.js';
 import { renderCompareScenariosView } from './js/ui/compare-scenarios.ui.js';
+import { renderProfitabilityView } from './js/ui/profitability.ui.js';
+import { renderBreakEvenView } from './js/ui/break-even.ui.js';
+import { renderRiskView } from './js/ui/risk.ui.js';
+import { renderHiringView } from './js/ui/hiring.ui.js';
+import { createHiringRole as createHiringRoleDoc, deleteHiringRole as deleteHiringRoleDoc, updateHiringRole as updateHiringRoleDoc } from './js/services/hiring.service.js';
+import { renderCashFlowView } from './js/ui/cashflow.ui.js';
+import { createCashFlowItem as createCashFlowItemDoc, deleteCashFlowItem as deleteCashFlowItemDoc, setInitialBalance as setInitialBalanceDoc, updateCashFlowItem as updateCashFlowItemDoc } from './js/services/cashflow.service.js';
 import { annualCycleModalContent, annualMonthModalContent, readAnnualCycleForm, readAnnualMonthForm, renderAnnualBudgetView } from './js/ui/annual-budget.ui.js';
 import { formModal } from './js/ui/forms.ui.js';
 import { confirmModal, closeModal, openModal } from './js/ui/modals.ui.js';
@@ -45,7 +52,7 @@ observeAuth({
 });
 
 function emptyBundle() {
-  return { plan: null, settings: normalizeSettings({}), serviceLines: [], services: [], fixedCosts: [], scenarios: [], scenarioItems: new Map(), snapshots: new Map(), annualBudget: { budget: null, months: [], cycles: [] } };
+  return { plan: null, settings: normalizeSettings({}), serviceLines: [], services: [], fixedCosts: [], scenarios: [], scenarioItems: new Map(), snapshots: new Map(), annualBudget: { budget: null, months: [], cycles: [] }, hiringRoles: [], cashFlowItems: [] };
 }
 
 async function bootAuthenticated() {
@@ -203,10 +210,18 @@ function renderRoute() {
   else if (state.route === 'fixed-costs') renderFixedCostsView(main, ctx);
   else if (state.route === 'scenarios') renderScenariosView(main, ctx);
   else if (state.route === 'scenario-detail') renderScenarioDetailView(main, ctx);
+  else if (state.route === 'profitability') renderProfitabilityView(main, ctx);
+  else if (state.route === 'break-even') renderBreakEvenView(main, ctx);
+  else if (state.route === 'risk') renderRiskView(main, ctx);
+  else if (state.route === 'hiring') renderHiringView(main, ctx);
+  else if (state.route === 'cashflow') renderCashFlowView(main, ctx);
   else if (state.route === 'compare') renderCompareScenariosView(main, ctx);
   else if (state.route === 'annual-budget') renderAnnualBudgetView(main, ctx);
   else if (state.route === 'settings') renderSettings(main);
   else renderDashboard(main, ctx);
+  main.classList.remove('view-enter');
+  void main.offsetWidth;
+  main.classList.add('view-enter');
 }
 
 function buildContext() {
@@ -251,6 +266,15 @@ const actions = {
   selectScenario(id) {
     state.selectedScenarioId = id;
     state.route = 'scenario-detail';
+    renderRoute();
+  },
+  goTo(route) {
+    state.route = route;
+    renderRoute();
+  },
+  selectScenarioStay(id, route) {
+    state.selectedScenarioId = id;
+    if (route) state.route = route;
     renderRoute();
   },
   async refresh() {
@@ -301,6 +325,79 @@ const actions = {
       closeModal();
       renderRoute();
       showToast('Servicios eliminados.', 'ok');
+    }
+  },
+  cashFlowItemForm(item = null) {
+    if (!guardWrite()) return;
+    openModal(formModal({
+      title: item ? 'Editar movimiento de caja' : 'Crear movimiento de caja',
+      fields: cashFlowItemFields(item),
+      submitLabel: item ? 'Guardar cambios' : 'Agregar movimiento',
+      onSubmit: async (values) => {
+        const payload = {
+          name: String(values.name || '').trim(),
+          kind: values.kind === 'outflow' ? 'outflow' : 'inflow',
+          amount: toNumber(values.amount),
+          frequency: values.frequency === 'once' ? 'once' : 'monthly',
+          month: Math.min(12, Math.max(1, toNumber(values.month, 1))),
+          startMonth: Math.min(12, Math.max(1, toNumber(values.startMonth, 1))),
+          endMonth: Math.min(12, Math.max(1, toNumber(values.endMonth, 12))),
+          active: values.active !== false,
+          notes: values.notes || '',
+        };
+        if (item) await updateCashFlowItemDoc(item.id, payload, { before: item, user: state.user });
+        else await createCashFlowItemDoc(payload, { user: state.user });
+        await afterSave('Movimiento de caja guardado.');
+      },
+    }));
+  },
+  async toggleCashFlowItem(item) {
+    if (!guardWrite()) return;
+    await updateCashFlowItemDoc(item.id, { active: item.active === false }, { before: item, user: state.user });
+    await afterSave(item.active === false ? 'Movimiento activado.' : 'Movimiento pausado.');
+  },
+  async deleteCashFlowItem(item) {
+    if (!guardWrite()) return;
+    if (await confirmModal('Eliminar movimiento', `Eliminar "${item.name}" de la proyeccion?`)) {
+      await deleteCashFlowItemDoc(item.id, { before: item, user: state.user });
+      await afterSave('Movimiento eliminado.');
+    }
+  },
+  async saveInitialBalance(amount) {
+    if (!guardWrite()) return;
+    await setInitialBalanceDoc(amount, { user: state.user });
+    await afterSave('Saldo inicial guardado.');
+  },
+  hiringRoleForm(role = null) {
+    if (!guardWrite()) return;
+    openModal(formModal({
+      title: role ? 'Editar cargo hipotetico' : 'Crear cargo hipotetico',
+      fields: hiringRoleFields(role),
+      submitLabel: role ? 'Guardar cambios' : 'Simular cargo',
+      onSubmit: async (values) => {
+        const payload = {
+          name: String(values.name || '').trim(),
+          salary: toNumber(values.salary),
+          benefitsFactor: Math.max(1, toNumber(values.benefitsFactor, 1)),
+          active: values.active !== false,
+          notes: values.notes || '',
+        };
+        if (role) await updateHiringRoleDoc(role.id, payload, { before: role, user: state.user });
+        else await createHiringRoleDoc(payload, { user: state.user });
+        await afterSave('Cargo hipotetico guardado.');
+      },
+    }));
+  },
+  async toggleHiringRole(role) {
+    if (!guardWrite()) return;
+    await updateHiringRoleDoc(role.id, { active: role.active === false }, { before: role, user: state.user });
+    await afterSave(role.active === false ? 'Cargo activado en la simulacion.' : 'Cargo pausado.');
+  },
+  async deleteHiringRole(role) {
+    if (!guardWrite()) return;
+    if (await confirmModal('Eliminar cargo hipotetico', `Eliminar "${role.name}" de la simulacion?`)) {
+      await deleteHiringRoleDoc(role.id, { before: role, user: state.user });
+      await afterSave('Cargo eliminado.');
     }
   },
   fixedCostForm(cost = null) {
@@ -724,6 +821,31 @@ function bindServiceForm(form) {
   syncMonths();
   pricing?.addEventListener('change', sync);
   form.querySelector('[data-field="cycleStartMonths"]')?.addEventListener('change', syncMonths);
+}
+
+function cashFlowItemFields(item) {
+  const monthOptions = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'].map((label, index) => ({ value: String(index + 1), label }));
+  return [
+    ['name', 'Nombre del movimiento', 'text', item?.name, true],
+    ['kind', 'Tipo', 'select', item?.kind || 'inflow', true, [{ value: 'inflow', label: 'Entrada (ingreso esperado)' }, { value: 'outflow', label: 'Salida (gasto, nomina, inversion)' }]],
+    ['amount', 'Monto', 'number', item?.amount ?? 0, true],
+    ['frequency', 'Frecuencia', 'select', item?.frequency || 'monthly', true, [{ value: 'monthly', label: 'Recurrente (rango de meses)' }, { value: 'once', label: 'Una sola vez' }]],
+    ['month', 'Mes (si es una sola vez)', 'select', String(item?.month || 1), false, monthOptions],
+    ['startMonth', 'Desde (si es recurrente)', 'select', String(item?.startMonth || 1), false, monthOptions],
+    ['endMonth', 'Hasta (si es recurrente)', 'select', String(item?.endMonth || 12), false, monthOptions],
+    ['active', 'Activo en la proyeccion', 'checkbox', item?.active ?? true, false],
+    ['notes', 'Notas', 'textarea', item?.notes || '', false],
+  ];
+}
+
+function hiringRoleFields(role) {
+  return [
+    ['name', 'Nombre del cargo', 'text', role?.name, true],
+    ['salary', 'Salario mensual', 'number', role?.salary ?? 0, true],
+    ['benefitsFactor', 'Factor prestacional (1 = solo salario; en Colombia suele ser 1.4 a 1.5)', 'number', role?.benefitsFactor ?? 1.5, false],
+    ['active', 'Incluir en la simulacion', 'checkbox', role?.active ?? true, false],
+    ['notes', 'Notas', 'textarea', role?.notes || '', false],
+  ];
 }
 
 function fixedCostFields(cost) {

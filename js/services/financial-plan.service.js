@@ -51,13 +51,15 @@ export async function updateSettings(payload, { before, user, planId = DEFAULT_P
 
 export async function getPlanBundle(planId = DEFAULT_PLAN_ID) {
   const plan = await getFinancialPlan(planId);
-  if (!plan) return { plan: null, settings: {}, serviceLines: [], services: [], fixedCosts: [], scenarios: [], scenarioItems: new Map(), snapshots: new Map(), annualBudget: { budget: null, months: [], cycles: [] } };
-  const [settings, serviceLines, services, fixedCosts, scenarios] = await Promise.all([
+  if (!plan) return { plan: null, settings: {}, serviceLines: [], services: [], fixedCosts: [], scenarios: [], scenarioItems: new Map(), snapshots: new Map(), annualBudget: { budget: null, months: [], cycles: [] }, hiringRoles: [], cashFlowItems: [] };
+  const [settings, serviceLines, services, fixedCosts, scenarios, hiringRoles, cashFlowItems] = await Promise.all([
     getSettings(planId),
     getCollection(planCollection('serviceLines', planId), 'sortOrder'),
     getCollection(planCollection('services', planId), 'name'),
     getCollection(planCollection('fixedCosts', planId), 'category'),
     getCollection(planCollection('scenarios', planId), 'name'),
+    getCollection(planCollection('hiringRoles', planId), 'name'),
+    getCollection(planCollection('cashFlowItems', planId), 'name'),
   ]);
   const scenarioItems = new Map();
   const snapshots = new Map();
@@ -72,7 +74,7 @@ export async function getPlanBundle(planId = DEFAULT_PLAN_ID) {
   }));
   const { getAnnualBudgetWithMonths } = await import('./annual-budget.service.js');
   const annualBudget = await getAnnualBudgetWithMonths(planId, planId);
-  return { plan, settings, serviceLines, services, fixedCosts, scenarios, scenarioItems, snapshots, annualBudget };
+  return { plan, settings, serviceLines, services, fixedCosts, scenarios, scenarioItems, snapshots, annualBudget, hiringRoles, cashFlowItems };
 }
 
 export async function ensureOrganizationAndPlan(user, planId = DEFAULT_PLAN_ID) {

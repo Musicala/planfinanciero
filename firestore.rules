@@ -1,0 +1,144 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAllowedEmail() {
+      return signedIn()
+        && request.auth.token.email in [
+          'alekcaballeromusic@gmail.com',
+          'catalina.medina.leal@gmail.com'
+        ];
+    }
+
+    function memberDoc(orgId) {
+      return get(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid));
+    }
+
+    function isActiveMember(orgId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid))
+        && memberDoc(orgId).data.active == true;
+    }
+
+    function role(orgId) {
+      return memberDoc(orgId).data.role;
+    }
+
+    function canReadOrg(orgId) {
+      return isAllowedEmail() || (isActiveMember(orgId) && role(orgId) in ['owner', 'admin', 'editor', 'viewer']);
+    }
+
+    function canWriteFinance(orgId) {
+      return isAllowedEmail() || (isActiveMember(orgId) && role(orgId) in ['owner', 'admin', 'editor']);
+    }
+
+    function canAdmin(orgId) {
+      return isAllowedEmail() || (isActiveMember(orgId) && role(orgId) in ['owner', 'admin']);
+    }
+
+    match /users/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isAllowedEmail());
+      allow create, update: if signedIn() && request.auth.uid == uid;
+      allow delete: if false;
+    }
+
+    match /organizations/{orgId} {
+      allow read, write: if isAllowedEmail();
+
+      allow read: if canReadOrg(orgId);
+      allow create, update: if canAdmin(orgId);
+      allow delete: if false;
+
+      match /{document=**} {
+        allow read, write: if isAllowedEmail();
+      }
+
+      match /members/{uid} {
+        allow read: if canReadOrg(orgId) || (signedIn() && request.auth.uid == uid);
+        allow create, update: if canAdmin(orgId);
+        allow delete: if canAdmin(orgId);
+      }
+
+      match /financialPlans/{planId} {
+        allow read: if canReadOrg(orgId);
+        allow create, update: if canWriteFinance(orgId);
+        allow delete: if canAdmin(orgId);
+
+        match /settings/{settingId} {
+          allow read: if canReadOrg(orgId);
+          allow write: if canAdmin(orgId);
+        }
+
+        match /serviceLines/{lineId} {
+          allow read: if canReadOrg(orgId);
+          allow write: if canWriteFinance(orgId);
+        }
+
+        match /services/{serviceId} {
+          allow read: if canReadOrg(orgId);
+          allow write: if canWriteFinance(orgId);
+        }
+
+        match /fixedCosts/{costId} {
+          allow read: if canReadOrg(orgId);
+          allow write: if canWriteFinance(orgId);
+        }
+
+        match /scenarios/{scenarioId} {
+          allow read: if canReadOrg(orgId);
+          allow write: if canWriteFinance(orgId);
+
+          match /items/{itemId} {
+            allow read: if canReadOrg(orgId);
+            allow write: if canWriteFinance(orgId);
+          }
+
+          match /snapshots/{snapshotId} {
+            allow read: if canReadOrg(orgId);
+            allow create: if canWriteFinance(orgId);
+            allow update, delete: if canAdmin(orgId);
+          }
+        }
+
+        match /hiringRoles/{roleId} {
+          allow read: if canReadOrg(orgId);
+          allow write: if canWriteFinance(orgId);
+        }
+
+        match /cashFlowItems/{itemId} {
+          allow read: if canReadOrg(orgId);
+          allow write: if canWriteFinance(orgId);
+        }
+
+        match /annualBudgets/{budgetId} {
+          allow read: if canReadOrg(orgId);
+          allow write: if canWriteFinance(orgId);
+
+          match /months/{monthId} {
+            allow read: if canReadOrg(orgId);
+            allow write: if canWriteFinance(orgId);
+          }
+
+          match /cycles/{cycleId} {
+            allow read: if canReadOrg(orgId);
+            allow write: if canWriteFinance(orgId);
+          }
+        }
+
+        match /monthlySummaries/{yearMonth} {
+          allow read: if canReadOrg(orgId);
+          allow write: if canWriteFinance(orgId);
+        }
+
+        match /auditLogs/{logId} {
+          allow read: if canAdmin(orgId);
+          allow create: if canWriteFinance(orgId);
+          allow update, delete: if false;
+        }
+      }
+    }
+  }
+}
