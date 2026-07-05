@@ -19,7 +19,10 @@ export function normalizeSettings(settings = {}) {
 export function withServiceDefaults(service = {}, settings = {}) {
   const s = normalizeSettings(settings);
   const pricingModel = normalizePricingModel(service.pricingModel || service.billingModel);
-  const rawTeacherCostPerClass = toNumber(service.teacherCostPerClass);
+  const teacherCostPerClassA = toNumber(service.teacherCostPerClassA ?? service.teacherCostPerClass);
+  const teacherCostPerClassB = toNumber(service.teacherCostPerClassB ?? teacherCostPerClassA);
+  const teacherCategory = service.teacherCategory === 'B' ? 'B' : 'A';
+  const rawTeacherCostPerClass = teacherCategory === 'B' ? teacherCostPerClassB : teacherCostPerClassA;
   const teacherCostPerClass = s.teacherPaymentStrategy === 'payroll' ? 0 : rawTeacherCostPerClass;
   return {
     name: service.name || '',
@@ -44,6 +47,9 @@ export function withServiceDefaults(service = {}, settings = {}) {
     expectedStudentsPerGroup: toNumber(service.expectedStudentsPerGroup, s.defaultExpectedStudentsPerGroup),
     rawTeacherCostPerClass,
     teacherCostPerClass,
+    teacherCostPerClassA,
+    teacherCostPerClassB,
+    teacherCategory,
     teacherPaymentStrategy: s.teacherPaymentStrategy,
     materialsCostPerStudent: toNumber(service.materialsCostPerStudent),
     materialsCostPerClass: toNumber(service.materialsCostPerClass),

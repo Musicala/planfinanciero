@@ -156,7 +156,9 @@ export function calculateScenario(scenario = {}, scenarioItems = [], services = 
     if (!base || base.active === false) return null;
     const overrides = {
       price: item.customPrice,
-      teacherCostPerClass: item.customTeacherCostPerClass,
+      teacherCostPerClassA: item.customTeacherCostPerClass,
+      teacherCostPerClassB: item.customTeacherCostPerClass,
+      teacherCategory: item.teacherCategory,
       materialsCostPerStudent: item.customMaterialsCostPerStudent,
       transportCostPerClass: item.customTransportCostPerClass,
       commissionPct: item.customCommissionPct,
@@ -289,7 +291,9 @@ export function allocateScenarioByTargetStudents(scenario = {}, scenarioItems = 
     if (!service || service.active === false) return null;
     const overrides = {
       price: item.customPrice,
-      teacherCostPerClass: item.customTeacherCostPerClass,
+      teacherCostPerClassA: item.customTeacherCostPerClass,
+      teacherCostPerClassB: item.customTeacherCostPerClass,
+      teacherCategory: item.teacherCategory,
       materialsCostPerStudent: item.customMaterialsCostPerStudent,
       transportCostPerClass: item.customTransportCostPerClass,
       commissionPct: item.customCommissionPct,
