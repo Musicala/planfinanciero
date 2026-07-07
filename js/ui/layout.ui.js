@@ -8,6 +8,7 @@ const navItems = [
   ['scenarios', 'Escenarios'],
   ['scenario-detail', 'Detalle escenario'],
   ['profitability', 'Rentabilidad'],
+  ['fair-pay', 'Rangos salariales'],
   ['break-even', 'Punto de equilibrio'],
   ['risk', 'Riesgo'],
   ['hiring', 'Contratacion'],

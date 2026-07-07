@@ -20,6 +20,7 @@ import { renderScenariosView } from './js/ui/scenarios.ui.js';
 import { renderScenarioDetailView } from './js/ui/scenario-detail.ui.js';
 import { renderCompareScenariosView } from './js/ui/compare-scenarios.ui.js';
 import { renderProfitabilityView } from './js/ui/profitability.ui.js';
+import { renderFairPayView } from './js/ui/fair-pay.ui.js';
 import { renderBreakEvenView } from './js/ui/break-even.ui.js';
 import { renderRiskView } from './js/ui/risk.ui.js';
 import { renderHiringView } from './js/ui/hiring.ui.js';
@@ -211,6 +212,7 @@ function renderRoute() {
   else if (state.route === 'scenarios') renderScenariosView(main, ctx);
   else if (state.route === 'scenario-detail') renderScenarioDetailView(main, ctx);
   else if (state.route === 'profitability') renderProfitabilityView(main, ctx);
+  else if (state.route === 'fair-pay') renderFairPayView(main, ctx);
   else if (state.route === 'break-even') renderBreakEvenView(main, ctx);
   else if (state.route === 'risk') renderRiskView(main, ctx);
   else if (state.route === 'hiring') renderHiringView(main, ctx);
