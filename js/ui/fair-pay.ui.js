@@ -19,6 +19,7 @@ export function renderFairPayView(root, focusState = null) {
     </section>
     ${reading(sim)}
     ${controlPanel(sim.controls)}
+    ${legalRulesPanel(sim.controls)}
     ${summaryCards(sim)}
     <section class="panel salary-ranges-panel">
       <div class="fixed-cost-list-head">
@@ -92,6 +93,35 @@ function controlPanel(controls) {
   </section>`;
 }
 
+function legalRulesPanel(controls) {
+  const rate = (name, label) => ruleInput(name, label, controls.rates[name] * 100, '%', 0.01);
+  return `<section class="panel salary-legal-rules">
+    <div class="fixed-cost-list-head">
+      <div>
+        <h3>Reglas legales y supuestos</h3>
+        <p class="muted">La base de aportes se toma como el mayor valor entre salario base y SMMLV. Los porcentajes quedan editables para revisar cambios normativos o ARL.</p>
+      </div>
+    </div>
+    <div class="salary-rule-summary">
+      <div><span>Base minima aportes</span><strong>max(salario base, SMMLV)</strong></div>
+      <div><span>Prestaciones</span><strong>sobre salario base del rango</strong></div>
+      <div><span>Auxilio, dotacion y examenes</span><strong>valores mensuales/anuales configurables</strong></div>
+    </div>
+    <div class="salary-rule-grid">
+      ${rate('employeeHealth', 'Salud empleado')}
+      ${rate('employeePension', 'Pension empleado')}
+      ${rate('employerHealth', 'Salud empresa')}
+      ${rate('employerPension', 'Pension empresa')}
+      ${rate('arl', 'ARL')}
+      ${rate('compensationFund', 'Caja compensacion')}
+      ${rate('severance', 'Cesantias')}
+      ${rate('severanceInterest', 'Intereses cesantias')}
+      ${rate('bonus', 'Prima')}
+      ${rate('vacation', 'Vacaciones')}
+    </div>
+  </section>`;
+}
+
 function summaryCards(sim) {
   const items = [
     ['Salario base prom.', formatCurrency(sim.summary.averageSalary), 'Despues de reservar costos laborales'],
@@ -150,6 +180,7 @@ function costNotes() {
 function breakdownDetails(row) {
   const items = [
     ['Salario base', row.salary],
+    ['Base aportes', row.contributionBase],
     ['Auxilio transporte', row.transportSubsidy],
     ['Salud empleado', row.employeeHealth],
     ['Pension empleado', row.employeePension],
@@ -176,6 +207,16 @@ function controlInput(name, label, value, suffix, step) {
     <span>${escapeHtml(label)}</span>
     <div class="fair-pay-input-wrap">
       <input data-salary-control="${name}" name="${name}" type="number" step="${step}" min="0" value="${escapeHtml(String(roundValue(value)))}" />
+      <em>${escapeHtml(suffix)}</em>
+    </div>
+  </label>`;
+}
+
+function ruleInput(name, label, value, suffix, step) {
+  return `<label class="field salary-range-field">
+    <span>${escapeHtml(label)}</span>
+    <div class="fair-pay-input-wrap">
+      <input data-salary-control="${name}" name="rate:${name}" type="number" step="${step}" min="0" value="${escapeHtml(String(roundRate(value)))}" />
       <em>${escapeHtml(suffix)}</em>
     </div>
   </label>`;
@@ -225,6 +266,18 @@ function saveFromDom(root, nextTeacherType = null, deleteIndex = null, addRange 
     transportSubsidy: valueOf(root, 'transportSubsidy'),
     dotationAnnual: valueOf(root, 'dotationAnnual'),
     medicalExamAnnual: valueOf(root, 'medicalExamAnnual'),
+    rates: {
+      employeeHealth: valueOf(root, 'rate:employeeHealth') / 100,
+      employeePension: valueOf(root, 'rate:employeePension') / 100,
+      employerHealth: valueOf(root, 'rate:employerHealth') / 100,
+      employerPension: valueOf(root, 'rate:employerPension') / 100,
+      arl: valueOf(root, 'rate:arl') / 100,
+      compensationFund: valueOf(root, 'rate:compensationFund') / 100,
+      severance: valueOf(root, 'rate:severance') / 100,
+      severanceInterest: valueOf(root, 'rate:severanceInterest') / 100,
+      bonus: valueOf(root, 'rate:bonus') / 100,
+      vacation: valueOf(root, 'rate:vacation') / 100,
+    },
   };
   const controlsByTeacher = {
     ...current.controlsByTeacher,
@@ -300,6 +353,11 @@ function safeJson(value) {
 function roundValue(value) {
   const n = Number(value);
   return Number.isFinite(n) ? Math.round(n) : value;
+}
+
+function roundRate(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.round(n * 100) / 100 : value;
 }
 
 function scheduleSalaryRangesRender(root, focusState) {

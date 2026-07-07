@@ -6,6 +6,18 @@ export const SALARY_RANGE_DEFAULTS = {
   transportSubsidy: 249095,
   dotationAnnual: 126950,
   medicalExamAnnual: 115610,
+  rates: {
+    employeeHealth: 0.04,
+    employeePension: 0.04,
+    severance: 0.0833,
+    severanceInterest: 0.01,
+    bonus: 0.0833,
+    vacation: 0.0417,
+    employerHealth: 0.085,
+    employerPension: 0.12,
+    arl: 0.01044,
+    compensationFund: 0.04,
+  },
   teacherProfiles: {
     A: {
       label: 'Docente A',
@@ -41,17 +53,6 @@ export const SALARY_RANGE_DEFAULTS = {
     },
   },
 };
-
-const EMPLOYEE_HEALTH = 0.04;
-const EMPLOYEE_PENSION = 0.04;
-const SEVERANCE = 0.0833;
-const SEVERANCE_INTEREST = 0.01;
-const BONUS = 0.0833;
-const VACATION = 0.0417;
-const EMPLOYER_HEALTH = 0.085;
-const EMPLOYER_PENSION = 0.12;
-const ARL = 0.01044;
-const COMPENSATION_FUND = 0.04;
 
 export function simulateSalaryRanges(controls = {}, rangesInput = []) {
   const normalized = normalizeSalaryRangeControls(controls);
@@ -92,6 +93,7 @@ export function normalizeSalaryRangeControls(controls = {}) {
     transportSubsidy: Math.max(0, toNumber(controls.transportSubsidy, SALARY_RANGE_DEFAULTS.transportSubsidy)),
     dotationAnnual: Math.max(0, toNumber(controls.dotationAnnual, SALARY_RANGE_DEFAULTS.dotationAnnual)),
     medicalExamAnnual: Math.max(0, toNumber(controls.medicalExamAnnual, SALARY_RANGE_DEFAULTS.medicalExamAnnual)),
+    rates: normalizeRates(controls.rates || controls),
   };
 }
 
@@ -133,34 +135,45 @@ function buildSalaryRangeRow(range, controls) {
 }
 
 function grossSalaryFromCompanyCost(companyCost, controls) {
+  const rates = controls.rates;
   const fixedMonthlyCosts = controls.transportSubsidy
     + safeDivide(controls.dotationAnnual, 12)
     + safeDivide(controls.medicalExamAnnual, 12);
+  const employerContributionRate = rates.employerHealth + rates.employerPension + rates.arl + rates.compensationFund;
+  const benefitsFactor = rates.severance + rates.severanceInterest + rates.bonus + rates.vacation;
+  const salaryWhenIbcIsMinimum = companyCost
+    - fixedMonthlyCosts
+    - (controls.smmlvMonthly * employerContributionRate);
+  if (salaryWhenIbcIsMinimum <= controls.smmlvMonthly) {
+    return Math.max(0, safeDivide(salaryWhenIbcIsMinimum, 1 + benefitsFactor));
+  }
   const variableFactor = 1
-    + SEVERANCE
-    + SEVERANCE_INTEREST
-    + BONUS
-    + VACATION
-    + EMPLOYER_HEALTH
-    + EMPLOYER_PENSION
-    + ARL
-    + COMPENSATION_FUND;
+    + rates.severance
+    + rates.severanceInterest
+    + rates.bonus
+    + rates.vacation
+    + rates.employerHealth
+    + rates.employerPension
+    + rates.arl
+    + rates.compensationFund;
   return Math.max(0, safeDivide(companyCost - fixedMonthlyCosts, variableFactor));
 }
 
 function laborCosts(salary, controls) {
+  const rates = controls.rates;
   const transportSubsidy = controls.transportSubsidy;
-  const employeeHealth = salary * EMPLOYEE_HEALTH;
-  const employeePension = salary * EMPLOYEE_PENSION;
+  const contributionBase = Math.max(salary, controls.smmlvMonthly);
+  const employeeHealth = contributionBase * rates.employeeHealth;
+  const employeePension = contributionBase * rates.employeePension;
   const netPay = salary + transportSubsidy - employeeHealth - employeePension;
-  const severance = salary * SEVERANCE;
-  const severanceInterest = salary * SEVERANCE_INTEREST;
-  const bonus = salary * BONUS;
-  const vacation = salary * VACATION;
-  const employerHealth = salary * EMPLOYER_HEALTH;
-  const employerPension = salary * EMPLOYER_PENSION;
-  const arl = salary * ARL;
-  const compensationFund = salary * COMPENSATION_FUND;
+  const severance = salary * rates.severance;
+  const severanceInterest = salary * rates.severanceInterest;
+  const bonus = salary * rates.bonus;
+  const vacation = salary * rates.vacation;
+  const employerHealth = contributionBase * rates.employerHealth;
+  const employerPension = contributionBase * rates.employerPension;
+  const arl = contributionBase * rates.arl;
+  const compensationFund = contributionBase * rates.compensationFund;
   const dotationMonthly = safeDivide(controls.dotationAnnual, 12);
   const medicalExamMonthly = safeDivide(controls.medicalExamAnnual, 12);
   const companyCost = salary
@@ -178,6 +191,7 @@ function laborCosts(salary, controls) {
 
   return {
     transportSubsidy,
+    contributionBase,
     employeeHealth,
     employeePension,
     netPay,
@@ -193,6 +207,13 @@ function laborCosts(salary, controls) {
     medicalExamMonthly,
     companyCost,
   };
+}
+
+function normalizeRates(input = {}) {
+  return Object.fromEntries(Object.entries(SALARY_RANGE_DEFAULTS.rates).map(([key, value]) => [
+    key,
+    clamp(toNumber(input[key], value), 0, 1),
+  ]));
 }
 
 function clamp(value, min, max) {
