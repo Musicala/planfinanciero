@@ -3,14 +3,13 @@ import { safeDivide, toNumber } from '../utils/numbers.js';
 export const SALARY_RANGE_DEFAULTS = {
   teacherType: 'A',
   smmlvMonthly: 1750905,
-  legalWeeklyHours: 48,
   transportSubsidy: 249095,
   dotationAnnual: 126950,
   medicalExamAnnual: 115610,
   teacherProfiles: {
     A: {
       label: 'Docente A',
-      teacherPremiumPct: 0.5,
+      baseHourlyPay: 23675,
       ranges: [
         { hours: 8, payAdjustmentPct: -0.18 },
         { hours: 12, payAdjustmentPct: -0.14 },
@@ -26,7 +25,7 @@ export const SALARY_RANGE_DEFAULTS = {
     },
     B: {
       label: 'Docente B',
-      teacherPremiumPct: 0.3,
+      baseHourlyPay: 20518,
       ranges: [
         { hours: 8, payAdjustmentPct: -0.18 },
         { hours: 12, payAdjustmentPct: -0.14 },
@@ -89,8 +88,7 @@ export function normalizeSalaryRangeControls(controls = {}) {
     teacherType,
     teacherLabel: profile.label,
     smmlvMonthly: Math.max(0, toNumber(controls.smmlvMonthly, SALARY_RANGE_DEFAULTS.smmlvMonthly)),
-    legalWeeklyHours: Math.max(1, toNumber(controls.legalWeeklyHours ?? convertLegacyMonthlyHours(controls.legalMonthlyHours), SALARY_RANGE_DEFAULTS.legalWeeklyHours)),
-    teacherPremiumPct: clamp(toNumber(controls.teacherPremiumPct, profile.teacherPremiumPct), 0, 2),
+    baseHourlyPay: Math.max(0, toNumber(controls.baseHourlyPay, profile.baseHourlyPay)),
     transportSubsidy: Math.max(0, toNumber(controls.transportSubsidy, SALARY_RANGE_DEFAULTS.transportSubsidy)),
     dotationAnnual: Math.max(0, toNumber(controls.dotationAnnual, SALARY_RANGE_DEFAULTS.dotationAnnual)),
     medicalExamAnnual: Math.max(0, toNumber(controls.medicalExamAnnual, SALARY_RANGE_DEFAULTS.medicalExamAnnual)),
@@ -113,10 +111,7 @@ export function normalizeRanges(rangesInput = [], teacherType = SALARY_RANGE_DEF
 
 function buildSalaryRangeRow(range, controls) {
   const monthlyHours = range.weeklyHours * 4;
-  const legalMonthlyHours = controls.legalWeeklyHours * 4;
-  const smmlvHourly = safeDivide(controls.smmlvMonthly, legalMonthlyHours);
-  const baseHourlyPay = smmlvHourly * (1 + controls.teacherPremiumPct);
-  const hourlyPay = safeDivide(baseHourlyPay, 1 + range.payAdjustmentPct);
+  const hourlyPay = controls.baseHourlyPay * (1 - range.payAdjustmentPct);
   const salary = Math.max(0, hourlyPay * monthlyHours);
   const costs = laborCosts(salary, controls);
 
@@ -124,10 +119,7 @@ function buildSalaryRangeRow(range, controls) {
     weeklyHours: range.weeklyHours,
     rangeHours: range.weeklyHours,
     monthlyHours,
-    legalMonthlyHours,
-    smmlvHourly,
-    baseHourlyPay,
-    teacherPremiumPct: controls.teacherPremiumPct,
+    baseHourlyPay: controls.baseHourlyPay,
     payAdjustmentPct: range.payAdjustmentPct,
     hourlyPay,
     salary,
@@ -180,12 +172,6 @@ function laborCosts(salary, controls) {
     medicalExamMonthly,
     companyCost,
   };
-}
-
-function convertLegacyMonthlyHours(value) {
-  if (value == null || value === '') return null;
-  const hours = toNumber(value);
-  return hours > 80 ? safeDivide(hours, 4) : hours;
 }
 
 function clamp(value, min, max) {

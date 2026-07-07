@@ -4,7 +4,7 @@ import { getTeacherProfile, normalizeRanges, simulateSalaryRanges } from '../dom
 
 const STORAGE_KEY = 'musicala:salary-ranges';
 
-export function renderFairPayView(root) {
+export function renderFairPayView(root, focusState = null) {
   const saved = readSavedState();
   const activeRanges = saved.rangesByTeacher[saved.teacherType] || [];
   const sim = simulateSalaryRanges({ ...saved.controls, teacherType: saved.teacherType }, activeRanges);
@@ -33,9 +33,13 @@ export function renderFairPayView(root) {
     ${costNotes()}`;
 
   root.querySelectorAll('[data-salary-control], [data-salary-row]').forEach((input) => {
+    input.addEventListener('input', () => {
+      saveFromDom(root);
+      scheduleSalaryRangesRender(root, captureFocus(input));
+    });
     input.addEventListener('change', () => {
       saveFromDom(root);
-      renderFairPayView(root);
+      renderFairPayView(root, captureFocus(input));
     });
     input.addEventListener('keydown', (event) => {
       if (event.key === 'Enter') input.blur();
@@ -61,6 +65,7 @@ export function renderFairPayView(root) {
     window.localStorage?.removeItem(STORAGE_KEY);
     renderFairPayView(root);
   });
+  restoreFocus(root, focusState);
 }
 
 function teacherSwitch(activeType) {
@@ -73,15 +78,14 @@ function teacherSwitch(activeType) {
 }
 
 function reading(sim) {
-  const text = `Base actual: ${sim.controls.teacherLabel} gana ${formatPercent(sim.controls.teacherPremiumPct)} sobre SMMLV/hora. Cada rango permite ajustar pago y margen solo con porcentajes.`;
+  const text = `Base actual: ${sim.controls.teacherLabel} usa ${formatCurrency(sim.controls.baseHourlyPay)} por hora en el rango de 28h. Los demas rangos salen de ese valor y del % pago rango.`;
   return `<section class="reading healthy"><p>${escapeHtml(text)}</p></section>`;
 }
 
 function controlPanel(controls) {
   return `<section class="panel salary-ranges-controls">
-    ${controlInput('smmlvMonthly', 'SMMLV mensual', controls.smmlvMonthly, '$', 1000)}
-    ${controlInput('legalWeeklyHours', 'Supuesto legal: horas semanales SMMLV', controls.legalWeeklyHours, 'h/sem', 1)}
-    ${controlInput('teacherPremiumPct', `Prima ${controls.teacherLabel} sobre SMMLV/hora`, controls.teacherPremiumPct * 100, '%', 1)}
+    ${controlInput('baseHourlyPay', `Valor hora base 28h ${controls.teacherLabel}`, controls.baseHourlyPay, '$', 100)}
+    ${controlInput('smmlvMonthly', 'SMMLV mensual referencial', controls.smmlvMonthly, '$', 1000)}
     ${controlInput('transportSubsidy', 'Auxilio transporte', controls.transportSubsidy, '$', 1000)}
     ${controlInput('dotationAnnual', 'Dotacion anual', controls.dotationAnnual, '$', 1000)}
     ${controlInput('medicalExamAnnual', 'Examenes medicos anual', controls.medicalExamAnnual, '$', 1000)}
@@ -93,7 +97,7 @@ function summaryCards(sim) {
     ['Salario mensual prom.', formatCurrency(sim.summary.averageSalary), 'Promedio simple de rangos'],
     ['Costo empresa prom.', formatCurrency(sim.summary.averageCompanyCost), 'Promedio simple de rangos'],
     ['Rangos semanales', String(sim.summary.reviewedRanges), 'Puedes agregar o quitar jornadas'],
-    ['Base salarial', `${formatPercent(sim.controls.teacherPremiumPct)} sobre SMMLV/hora`, sim.controls.teacherLabel],
+    ['Base 28h', formatCurrency(sim.controls.baseHourlyPay), sim.controls.teacherLabel],
   ];
   return `<section class="kpi-grid salary-ranges-kpis">${items.map(([label, value, sub]) => `<article class="metric-card"><span>${label}</span><strong>${value}</strong><small>${sub}</small></article>`).join('')}</section>`;
 }
@@ -134,7 +138,7 @@ function costNotes() {
     <h3>Como leerlo</h3>
     <div class="exec-quick">
       <div><span>Horas semanales</span><strong>Unidad principal para crear y comparar rangos</strong></div>
-      <div><span>Porcentaje</span><strong>Ajuste por rango sobre la base SMMLV + prima docente</strong></div>
+      <div><span>Base manual</span><strong>El rango 28h define el valor hora base</strong></div>
       <div><span>Diferenciales</span><strong>Comparan salario y costo contra el rango anterior</strong></div>
       <div><span>Costos</span><strong>Auxilio, aportes, prestaciones, dotacion y examenes</strong></div>
     </div>
@@ -159,7 +163,7 @@ function readSavedState() {
   const parsed = safeJson(window.localStorage?.getItem(STORAGE_KEY));
   const teacherType = parsed?.teacherType === 'B' ? 'B' : 'A';
   const commonControls = normalizeLegacyControls(parsed?.controls || {});
-  const teacherControls = parsed?.controlsByTeacher?.[teacherType] || {};
+  const teacherControls = normalizeLegacyTeacherControls(teacherType, commonControls, parsed?.controlsByTeacher?.[teacherType] || {});
   return {
     teacherType,
     controls: { ...commonControls, ...teacherControls, teacherType },
@@ -169,12 +173,21 @@ function readSavedState() {
 }
 
 function normalizeLegacyControls(controls) {
-  if (controls.legalWeeklyHours || !controls.legalMonthlyHours) return controls;
-  const legacy = Number(controls.legalMonthlyHours) || 0;
-  return {
-    ...controls,
-    legalWeeklyHours: legacy > 80 ? legacy / 4 : legacy,
-  };
+  const next = { ...controls };
+  delete next.legalMonthlyHours;
+  delete next.legalWeeklyHours;
+  return next;
+}
+
+function normalizeLegacyTeacherControls(teacherType, commonControls, teacherControls) {
+  if (teacherControls.baseHourlyPay) return teacherControls;
+  const profile = getTeacherProfile(teacherType);
+  if (teacherControls.teacherPremiumPct != null) {
+    const smmlv = Number(commonControls.smmlvMonthly) || 0;
+    const base = smmlv ? (smmlv / (48 * 4)) * (1 + Number(teacherControls.teacherPremiumPct)) : profile.baseHourlyPay;
+    return { ...teacherControls, baseHourlyPay: Math.round(base) };
+  }
+  return { ...teacherControls, baseHourlyPay: profile.baseHourlyPay };
 }
 
 function saveFromDom(root, nextTeacherType = null, deleteIndex = null, addRange = false) {
@@ -183,7 +196,6 @@ function saveFromDom(root, nextTeacherType = null, deleteIndex = null, addRange 
   const targetTeacherType = nextTeacherType || activeTeacherType;
   const controls = {
     smmlvMonthly: valueOf(root, 'smmlvMonthly'),
-    legalWeeklyHours: valueOf(root, 'legalWeeklyHours'),
     transportSubsidy: valueOf(root, 'transportSubsidy'),
     dotationAnnual: valueOf(root, 'dotationAnnual'),
     medicalExamAnnual: valueOf(root, 'medicalExamAnnual'),
@@ -191,7 +203,7 @@ function saveFromDom(root, nextTeacherType = null, deleteIndex = null, addRange 
   const controlsByTeacher = {
     ...current.controlsByTeacher,
     [activeTeacherType]: {
-      teacherPremiumPct: valueOf(root, 'teacherPremiumPct') / 100,
+      baseHourlyPay: valueOf(root, 'baseHourlyPay'),
     },
   };
   let ranges = normalizeRanges(currentRangesFromDom(root, activeTeacherType), activeTeacherType);
@@ -262,4 +274,37 @@ function safeJson(value) {
 function roundValue(value) {
   const n = Number(value);
   return Number.isFinite(n) ? Math.round(n) : value;
+}
+
+function scheduleSalaryRangesRender(root, focusState) {
+  window.clearTimeout(root.__salaryRangesRenderTimer);
+  root.__salaryRangesRenderTimer = window.setTimeout(() => {
+    renderFairPayView(root, focusState);
+  }, 350);
+}
+
+function captureFocus(input) {
+  const state = { name: input.name, value: input.value };
+  try {
+    state.selectionStart = input.selectionStart;
+    state.selectionEnd = input.selectionEnd;
+  } catch {
+    state.selectionStart = null;
+    state.selectionEnd = null;
+  }
+  return state;
+}
+
+function restoreFocus(root, focusState) {
+  if (!focusState?.name) return;
+  const input = root.querySelector(`[name="${CSS.escape(focusState.name)}"]`);
+  if (!input) return;
+  input.focus();
+  if (focusState.selectionStart == null || document.activeElement !== input) return;
+  try {
+    const cursor = Math.min(String(input.value).length, focusState.selectionStart);
+    input.setSelectionRange(cursor, cursor);
+  } catch {
+    // Number inputs do not support selection ranges in every browser.
+  }
 }
