@@ -78,13 +78,13 @@ function teacherSwitch(activeType) {
 }
 
 function reading(sim) {
-  const text = `Base actual: ${sim.controls.teacherLabel} usa ${formatCurrency(sim.controls.baseHourlyPay)} por hora en el rango de 28h. Los demas rangos salen de ese valor y del % pago rango.`;
+  const text = `Base actual: ${sim.controls.teacherLabel} usa ${formatCurrency(sim.controls.baseHourlyPay)} como costo final por hora en el rango de 28h. Los demas rangos salen de ese valor y el desglose separa salario, auxilio, aportes, prestaciones y extras.`;
   return `<section class="reading healthy"><p>${escapeHtml(text)}</p></section>`;
 }
 
 function controlPanel(controls) {
   return `<section class="panel salary-ranges-controls">
-    ${controlInput('baseHourlyPay', `Valor hora base 28h ${controls.teacherLabel}`, controls.baseHourlyPay, '$', 100)}
+    ${controlInput('baseHourlyPay', `Costo final hora base 28h ${controls.teacherLabel}`, controls.baseHourlyPay, '$', 100)}
     ${controlInput('smmlvMonthly', 'SMMLV mensual referencial', controls.smmlvMonthly, '$', 1000)}
     ${controlInput('transportSubsidy', 'Auxilio transporte', controls.transportSubsidy, '$', 1000)}
     ${controlInput('dotationAnnual', 'Dotacion anual', controls.dotationAnnual, '$', 1000)}
@@ -94,10 +94,10 @@ function controlPanel(controls) {
 
 function summaryCards(sim) {
   const items = [
-    ['Salario mensual prom.', formatCurrency(sim.summary.averageSalary), 'Promedio simple de rangos'],
+    ['Salario base prom.', formatCurrency(sim.summary.averageSalary), 'Despues de reservar costos laborales'],
     ['Costo empresa prom.', formatCurrency(sim.summary.averageCompanyCost), 'Promedio simple de rangos'],
     ['Rangos semanales', String(sim.summary.reviewedRanges), 'Puedes agregar o quitar jornadas'],
-    ['Base 28h', formatCurrency(sim.controls.baseHourlyPay), sim.controls.teacherLabel],
+    ['Costo final 28h', formatCurrency(sim.controls.baseHourlyPay), sim.controls.teacherLabel],
   ];
   return `<section class="kpi-grid salary-ranges-kpis">${items.map(([label, value, sub]) => `<article class="metric-card"><span>${label}</span><strong>${value}</strong><small>${sub}</small></article>`).join('')}</section>`;
 }
@@ -109,10 +109,11 @@ function salaryRangesTable(rows) {
         <th class="num">Horas sem.</th>
         <th class="num">Equiv. mes</th>
         <th class="num">% pago rango</th>
-        <th class="num">Pago/hora</th>
-        <th class="num">Salario mensual</th>
+        <th class="num">Costo final/hora</th>
+        <th class="num">Salario base</th>
         <th class="num">Costo real empresa</th>
         <th class="num">Costo/hora</th>
+        <th>Desglose</th>
         <th class="num">Dif. salario</th>
         <th class="num">Dif. costo</th>
         <th></th>
@@ -126,6 +127,7 @@ function salaryRangesTable(rows) {
       <td class="num">${formatCurrency(row.salary)}</td>
       <td class="num">${formatCurrency(row.companyCost)}</td>
       <td class="num">${formatCurrency(row.companyCostPerHour)}</td>
+      <td>${breakdownDetails(row)}</td>
       <td class="num">${row.salaryDifference == null ? 'Base' : formatCurrency(row.salaryDifference)}</td>
       <td class="num">${row.costDifference == null ? 'Base' : formatCurrency(row.costDifference)}</td>
       <td class="num"><button class="btn btn-ghost" data-delete-range="${index}" type="button">Eliminar</button></td>
@@ -138,11 +140,35 @@ function costNotes() {
     <h3>Como leerlo</h3>
     <div class="exec-quick">
       <div><span>Horas semanales</span><strong>Unidad principal para crear y comparar rangos</strong></div>
-      <div><span>Base manual</span><strong>El rango 28h define el valor hora base</strong></div>
+      <div><span>Base manual</span><strong>El rango 28h define el costo final por hora</strong></div>
       <div><span>Diferenciales</span><strong>Comparan salario y costo contra el rango anterior</strong></div>
       <div><span>Costos</span><strong>Auxilio, aportes, prestaciones, dotacion y examenes</strong></div>
     </div>
   </section>`;
+}
+
+function breakdownDetails(row) {
+  const items = [
+    ['Salario base', row.salary],
+    ['Auxilio transporte', row.transportSubsidy],
+    ['Salud empleado', row.employeeHealth],
+    ['Pension empleado', row.employeePension],
+    ['Pago neto aprox.', row.netPay],
+    ['Cesantias', row.severance],
+    ['Intereses cesantias', row.severanceInterest],
+    ['Prima', row.bonus],
+    ['Vacaciones', row.vacation],
+    ['Salud empresa', row.employerHealth],
+    ['Pension empresa', row.employerPension],
+    ['ARL', row.arl],
+    ['Caja compensacion', row.compensationFund],
+    ['Dotacion mensual', row.dotationMonthly],
+    ['Examen mensual', row.medicalExamMonthly],
+  ];
+  return `<details class="salary-breakdown">
+    <summary>Ver costos</summary>
+    <dl>${items.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${formatCurrency(value)}</dd></div>`).join('')}</dl>
+  </details>`;
 }
 
 function controlInput(name, label, value, suffix, step) {

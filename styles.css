@@ -245,10 +245,16 @@ tr:hover td { background: #fbfcff; }
 .salary-ranges-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .salary-ranges-panel { padding: 0; overflow: hidden; }
 .salary-ranges-panel .fixed-cost-list-head { border: 0; border-bottom: 1px solid var(--line); }
-.salary-ranges-table { min-width: 1780px; }
+.salary-ranges-table { min-width: 1880px; }
 .salary-ranges-table .table-input { width: 110px; }
 .salary-row-input-wrap { display: inline-grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 5px; }
 .salary-row-input-wrap em { color: var(--muted); font-style: normal; font-size: 12px; font-weight: 800; }
+.salary-breakdown { min-width: 220px; text-align: left; }
+.salary-breakdown summary { color: var(--blue); cursor: pointer; font-weight: 900; list-style-position: inside; }
+.salary-breakdown dl { display: grid; gap: 6px; margin: 10px 0 0; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: #fbfcff; }
+.salary-breakdown div { display: flex; justify-content: space-between; gap: 14px; }
+.salary-breakdown dt { color: var(--muted); font-size: 12px; font-weight: 700; }
+.salary-breakdown dd { margin: 0; font-size: 12px; font-weight: 900; white-space: nowrap; }
 .salary-cost-notes { margin-top: 16px; }
 .cf-config { margin-bottom: 16px; }
 .cf-config-grid { display: flex; gap: 14px; align-items: flex-end; flex-wrap: wrap; }

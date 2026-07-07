@@ -111,8 +111,9 @@ export function normalizeRanges(rangesInput = [], teacherType = SALARY_RANGE_DEF
 
 function buildSalaryRangeRow(range, controls) {
   const monthlyHours = range.weeklyHours * 4;
-  const hourlyPay = controls.baseHourlyPay * (1 - range.payAdjustmentPct);
-  const salary = Math.max(0, hourlyPay * monthlyHours);
+  const finalHourlyCost = controls.baseHourlyPay * (1 - range.payAdjustmentPct);
+  const targetCompanyCost = Math.max(0, finalHourlyCost * monthlyHours);
+  const salary = grossSalaryFromCompanyCost(targetCompanyCost, controls);
   const costs = laborCosts(salary, controls);
 
   return {
@@ -121,11 +122,30 @@ function buildSalaryRangeRow(range, controls) {
     monthlyHours,
     baseHourlyPay: controls.baseHourlyPay,
     payAdjustmentPct: range.payAdjustmentPct,
-    hourlyPay,
+    hourlyPay: finalHourlyCost,
+    finalHourlyCost,
+    salaryHourlyPay: safeDivide(salary, monthlyHours),
     salary,
     ...costs,
+    targetCompanyCost,
     companyCostPerHour: safeDivide(costs.companyCost, monthlyHours),
   };
+}
+
+function grossSalaryFromCompanyCost(companyCost, controls) {
+  const fixedMonthlyCosts = controls.transportSubsidy
+    + safeDivide(controls.dotationAnnual, 12)
+    + safeDivide(controls.medicalExamAnnual, 12);
+  const variableFactor = 1
+    + SEVERANCE
+    + SEVERANCE_INTEREST
+    + BONUS
+    + VACATION
+    + EMPLOYER_HEALTH
+    + EMPLOYER_PENSION
+    + ARL
+    + COMPENSATION_FUND;
+  return Math.max(0, safeDivide(companyCost - fixedMonthlyCosts, variableFactor));
 }
 
 function laborCosts(salary, controls) {
@@ -143,7 +163,8 @@ function laborCosts(salary, controls) {
   const compensationFund = salary * COMPENSATION_FUND;
   const dotationMonthly = safeDivide(controls.dotationAnnual, 12);
   const medicalExamMonthly = safeDivide(controls.medicalExamAnnual, 12);
-  const companyCost = netPay
+  const companyCost = salary
+    + transportSubsidy
     + severance
     + severanceInterest
     + bonus
