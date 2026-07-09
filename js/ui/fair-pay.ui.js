@@ -8,20 +8,24 @@ export function renderFairPayView(root, focusState = null) {
   const saved = readSavedState();
   const activeRanges = saved.rangesByTeacher[saved.teacherType] || [];
   const sim = simulateSalaryRanges({ ...saved.controls, teacherType: saved.teacherType }, activeRanges);
+  const isDailyView = saved.payView === 'daily';
+  const isVacationView = saved.payView === 'vacation';
 
   root.innerHTML = `
     <section class="view-head">
-      <div><p class="eyebrow">Rangos salariales</p><h2>Modelo porcentual por horas semanales</h2></div>
+      <div><p class="eyebrow">Rangos salariales</p><h2>${payViewTitle(saved.payView)}</h2></div>
       <div class="actions">
+        ${payViewSwitch(saved.payView)}
         ${teacherSwitch(saved.teacherType)}
         <button class="btn btn-secondary" id="salaryRangesReset" type="button">Restaurar base</button>
       </div>
     </section>
     ${reading(sim)}
     ${controlPanel(sim.controls)}
-    ${legalRulesPanel(sim.controls)}
-    ${summaryCards(sim)}
-    <section class="panel salary-ranges-panel">
+    ${isDailyView ? dailyPayPanel(sim) : isVacationView ? vacationPayPanel(sim) : `
+      ${legalRulesPanel(sim.controls)}
+      ${summaryCards(sim)}
+      <section class="panel salary-ranges-panel">
       <div class="fixed-cost-list-head">
         <div>
           <h3>Reglas porcentuales por rango</h3>
@@ -30,7 +34,7 @@ export function renderFairPayView(root, focusState = null) {
         <button class="btn btn-primary" id="salaryRangeAdd" type="button">+ Rango</button>
       </div>
       ${salaryRangesTable(sim.rows)}
-    </section>
+    </section>`}
     ${costNotes()}`;
 
   root.querySelectorAll('[data-salary-control], [data-salary-row]').forEach((input) => {
@@ -52,6 +56,12 @@ export function renderFairPayView(root, focusState = null) {
       renderFairPayView(root);
     });
   });
+  root.querySelectorAll('[data-pay-view]').forEach((button) => {
+    button.addEventListener('click', () => {
+      saveFromDom(root, null, null, false, button.dataset.payView);
+      renderFairPayView(root);
+    });
+  });
   root.querySelectorAll('[data-delete-range]').forEach((button) => {
     button.addEventListener('click', () => {
       saveFromDom(root, null, Number(button.dataset.deleteRange));
@@ -67,6 +77,23 @@ export function renderFairPayView(root, focusState = null) {
     renderFairPayView(root);
   });
   restoreFocus(root, focusState);
+}
+
+function payViewSwitch(activeView) {
+  const views = [
+    ['weekly', 'Horas semanales'],
+    ['daily', 'Pago por jornadas'],
+    ['vacation', 'Vacacionales'],
+  ];
+  return `<div class="segmented salary-view-switch" aria-label="Vista de pago">
+    ${views.map(([view, label]) => `<button type="button" data-pay-view="${view}" class="${view === activeView ? 'is-active' : ''}">${escapeHtml(label)}</button>`).join('')}
+  </div>`;
+}
+
+function payViewTitle(payView) {
+  if (payView === 'daily') return 'Pago por jornadas';
+  if (payView === 'vacation') return 'Pago para vacacionales';
+  return 'Modelo porcentual por horas semanales';
 }
 
 function teacherSwitch(activeType) {
@@ -120,6 +147,102 @@ function legalRulesPanel(controls) {
       ${rate('vacation', 'Vacaciones')}
     </div>
   </section>`;
+}
+
+function dailyPayPanel(sim) {
+  const rows = buildDailyPayRows(sim.controls);
+  return `<section class="panel salary-ranges-panel salary-daily-panel">
+    <div class="fixed-cost-list-head">
+      <div>
+        <h3>Tabla de pago por jornadas</h3>
+        <p class="muted">Para bloques pagados en un mismo dia. El pago se calcula con la hora base activa de ${escapeHtml(sim.controls.teacherLabel)}.</p>
+      </div>
+      <span class="badge healthy">${escapeHtml(sim.controls.teacherLabel)}</span>
+    </div>
+    <div class="table-wrap"><table class="salary-daily-table">
+      <thead>
+        <tr>
+          <th class="num">Horas bloque</th>
+          <th class="num">Pago jornada</th>
+          <th class="num">Valor hora</th>
+          <th>Uso</th>
+        </tr>
+      </thead>
+      <tbody>${rows.map((row) => `<tr>
+        <td class="num">${row.hours}</td>
+        <td class="num"><strong>${formatCurrency(row.totalPay)}</strong></td>
+        <td class="num">${formatCurrency(row.hourlyPay)}</td>
+        <td>${escapeHtml(row.label)}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>
+  </section>`;
+}
+
+function buildDailyPayRows(controls) {
+  return Array.from({ length: 7 }, (_item, index) => {
+    const hours = index + 2;
+    return {
+      hours,
+      hourlyPay: controls.baseHourlyPay,
+      totalPay: controls.baseHourlyPay * hours,
+      label: `${hours} horas en una misma jornada`,
+    };
+  });
+}
+
+function vacationPayPanel(sim) {
+  const rows = buildVacationPayRows(sim.controls);
+  return `<section class="panel salary-ranges-panel salary-vacation-panel">
+    <div class="fixed-cost-list-head">
+      <div>
+        <h3>Tabla de pago para vacacionales</h3>
+        <p class="muted">Calcula paquetes de 4 horas por dia, semanas de 4 o 5 dias, y combinaciones de dos semanas.</p>
+      </div>
+      <span class="badge healthy">${escapeHtml(sim.controls.teacherLabel)}</span>
+    </div>
+    <div class="table-wrap"><table class="salary-vacation-table">
+      <thead>
+        <tr>
+          <th>Opcion</th>
+          <th class="num">Dias</th>
+          <th class="num">Horas</th>
+          <th class="num">Valor hora</th>
+          <th class="num">Pago total</th>
+        </tr>
+      </thead>
+      <tbody>${rows.map((row) => `<tr>
+        <td><strong>${escapeHtml(row.label)}</strong><small>${escapeHtml(row.note)}</small></td>
+        <td class="num">${row.days}</td>
+        <td class="num">${row.hours}</td>
+        <td class="num">${formatCurrency(row.hourlyPay)}</td>
+        <td class="num"><strong>${formatCurrency(row.totalPay)}</strong></td>
+      </tr>`).join('')}</tbody>
+    </table></div>
+  </section>`;
+}
+
+function buildVacationPayRows(controls) {
+  const dayHours = 4;
+  const rows = [
+    ['Por dia', 1, '4 horas en un dia'],
+    ['Semana 4 dias', 4, '16 horas en la semana'],
+    ['Semana 5 dias', 5, '20 horas en la semana'],
+    ['Dos semanas 4 + 4', 8, '32 horas combinadas'],
+    ['Dos semanas 5 + 5', 10, '40 horas combinadas'],
+    ['Dos semanas 5 + 4', 9, '36 horas combinadas'],
+    ['Dos semanas 4 + 5', 9, '36 horas combinadas'],
+  ];
+  return rows.map(([label, days, note]) => {
+    const hours = days * dayHours;
+    return {
+      label,
+      days,
+      hours,
+      note,
+      hourlyPay: controls.baseHourlyPay,
+      totalPay: controls.baseHourlyPay * hours,
+    };
+  });
 }
 
 function summaryCards(sim) {
@@ -229,10 +352,12 @@ function rowInput(index, name, value, step, suffix = '') {
 function readSavedState() {
   const parsed = safeJson(window.localStorage?.getItem(STORAGE_KEY));
   const teacherType = parsed?.teacherType === 'B' ? 'B' : 'A';
+  const payView = ['daily', 'vacation'].includes(parsed?.payView) ? parsed.payView : 'weekly';
   const commonControls = normalizeLegacyControls(parsed?.controls || {});
   const teacherControls = normalizeLegacyTeacherControls(teacherType, commonControls, parsed?.controlsByTeacher?.[teacherType] || {});
   return {
     teacherType,
+    payView,
     controls: { ...commonControls, ...teacherControls, teacherType },
     controlsByTeacher: parsed?.controlsByTeacher || {},
     rangesByTeacher: parsed?.rangesByTeacher || migrateLegacyRows(parsed),
@@ -257,10 +382,12 @@ function normalizeLegacyTeacherControls(teacherType, commonControls, teacherCont
   return { ...teacherControls, baseHourlyPay: profile.baseHourlyPay };
 }
 
-function saveFromDom(root, nextTeacherType = null, deleteIndex = null, addRange = false) {
+function saveFromDom(root, nextTeacherType = null, deleteIndex = null, addRange = false, nextPayView = null) {
   const current = readSavedState();
   const activeTeacherType = root.querySelector('[data-teacher-type].is-active')?.dataset.teacherType || current.teacherType;
   const targetTeacherType = nextTeacherType || activeTeacherType;
+  const activePayView = root.querySelector('[data-pay-view].is-active')?.dataset.payView || current.payView;
+  const targetPayView = nextPayView || activePayView;
   const controls = {
     smmlvMonthly: valueOf(root, 'smmlvMonthly'),
     transportSubsidy: valueOf(root, 'transportSubsidy'),
@@ -285,7 +412,10 @@ function saveFromDom(root, nextTeacherType = null, deleteIndex = null, addRange 
       baseHourlyPay: valueOf(root, 'baseHourlyPay'),
     },
   };
-  let ranges = normalizeRanges(currentRangesFromDom(root, activeTeacherType), activeTeacherType);
+  const hasRangeRows = Boolean(root.querySelector('[data-salary-row]'));
+  let ranges = hasRangeRows
+    ? normalizeRanges(currentRangesFromDom(root, activeTeacherType), activeTeacherType)
+    : (current.rangesByTeacher[activeTeacherType] || []);
   if (deleteIndex != null) ranges = ranges.filter((_range, index) => index !== deleteIndex);
   if (addRange) {
     const last = ranges[ranges.length - 1] || { weeklyHours: 28, payAdjustmentPct: 0 };
@@ -297,6 +427,7 @@ function saveFromDom(root, nextTeacherType = null, deleteIndex = null, addRange 
   };
   window.localStorage?.setItem(STORAGE_KEY, JSON.stringify({
     teacherType: targetTeacherType,
+    payView: targetPayView,
     controls,
     controlsByTeacher,
     rangesByTeacher,

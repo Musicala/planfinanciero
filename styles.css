@@ -241,11 +241,20 @@ tr:hover td { background: #fbfcff; }
 .salary-ranges-controls { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-bottom: 16px; }
 .salary-teacher-switch { align-self: stretch; }
 .salary-teacher-switch button { min-width: 112px; text-align: center; }
+.salary-view-switch { align-self: stretch; }
+.salary-view-switch button { min-width: 118px; text-align: center; }
 .salary-range-field input { width: 100%; min-width: 0; }
 .salary-ranges-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .salary-ranges-panel { padding: 0; overflow: hidden; }
 .salary-ranges-panel .fixed-cost-list-head { border: 0; border-bottom: 1px solid var(--line); }
 .salary-ranges-table { min-width: 1880px; }
+.salary-daily-table { min-width: 720px; }
+.salary-daily-table strong { color: var(--blue); font-size: 16px; }
+.salary-vacation-table { min-width: 860px; }
+.salary-vacation-table td:first-child { display: grid; gap: 3px; }
+.salary-vacation-table td:first-child strong { color: var(--blue); font-size: 15px; }
+.salary-vacation-table td:first-child small { color: var(--muted); font-weight: 700; }
+.salary-vacation-table td:last-child strong { color: var(--blue); font-size: 16px; }
 .salary-ranges-table .table-input { width: 110px; }
 .salary-row-input-wrap { display: inline-grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 5px; }
 .salary-row-input-wrap em { color: var(--muted); font-style: normal; font-size: 12px; font-weight: 800; }
