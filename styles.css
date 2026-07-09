@@ -259,6 +259,7 @@ tr:hover td { background: #fbfcff; }
 .salary-ranges-table .table-input { width: 110px; }
 .salary-row-input-wrap { display: inline-grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 5px; }
 .salary-row-input-wrap em { color: var(--muted); font-style: normal; font-size: 12px; font-weight: 800; }
+.salary-service-input-wrap .table-input { width: 118px; }
 .salary-legal-rules { margin-bottom: 16px; }
 .salary-legal-rules .fixed-cost-list-head { margin: -2px -2px 14px; padding: 0 0 12px; border: 0; border-bottom: 1px solid var(--line); }
 .salary-rule-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }

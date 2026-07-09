@@ -1,6 +1,6 @@
 import { escapeHtml } from '../utils/dom.js';
 import { formatCurrency, formatPercent } from '../utils/format.js';
-import { getTeacherProfile, normalizeRanges, simulateSalaryRanges } from '../domain/fair-pay.engine.js';
+import { getTeacherProfile, normalizeRanges, normalizeSalaryRangeControls, simulateSalaryRanges } from '../domain/fair-pay.engine.js';
 
 const STORAGE_KEY = 'musicala:salary-ranges';
 
@@ -10,6 +10,7 @@ export function renderFairPayView(root, focusState = null) {
   const sim = simulateSalaryRanges({ ...saved.controls, teacherType: saved.teacherType }, activeRanges);
   const isDailyView = saved.payView === 'daily';
   const isVacationView = saved.payView === 'vacation';
+  const serviceAdjustments = saved.serviceAdjustmentsByTeacher?.[saved.teacherType]?.[saved.payView] || {};
 
   root.innerHTML = `
     <section class="view-head">
@@ -22,7 +23,7 @@ export function renderFairPayView(root, focusState = null) {
     </section>
     ${reading(sim, saved.payView)}
     ${controlPanel(sim.controls, saved.payView)}
-    ${isDailyView ? dailyPayPanel(sim) : isVacationView ? vacationPayPanel(sim) : `
+    ${isDailyView ? dailyPayPanel(sim, serviceAdjustments) : isVacationView ? vacationPayPanel(sim, serviceAdjustments) : `
       ${legalRulesPanel(sim.controls)}
       ${summaryCards(sim)}
       <section class="panel salary-ranges-panel">
@@ -37,13 +38,13 @@ export function renderFairPayView(root, focusState = null) {
     </section>`}
     ${costNotes(saved.payView)}`;
 
-  root.querySelectorAll('[data-salary-control], [data-salary-row]').forEach((input) => {
+  root.querySelectorAll('[data-salary-control], [data-salary-row], [data-service-row]').forEach((input) => {
     input.addEventListener('input', () => {
-      saveFromDom(root);
+      saveFromDom(root, null, null, false, null, input.name);
       scheduleSalaryRangesRender(root, captureFocus(input));
     });
     input.addEventListener('change', () => {
-      saveFromDom(root);
+      saveFromDom(root, null, null, false, null, input.name);
       renderFairPayView(root, captureFocus(input));
     });
     input.addEventListener('keydown', (event) => {
@@ -157,8 +158,8 @@ function legalRulesPanel(controls) {
   </section>`;
 }
 
-function dailyPayPanel(sim) {
-  const rows = buildDailyPayRows(sim.controls);
+function dailyPayPanel(sim, adjustments = {}) {
+  const rows = buildDailyPayRows(sim.controls, adjustments);
   return `<section class="panel salary-ranges-panel salary-daily-panel">
     <div class="fixed-cost-list-head">
       <div>
@@ -179,8 +180,8 @@ function dailyPayPanel(sim) {
       </thead>
       <tbody>${rows.map((row) => `<tr>
         <td class="num">${row.hours}</td>
-        <td class="num">${formatPercent(row.volumeDiscountPct)}</td>
-        <td class="num">${formatCurrency(row.hourlyPay)}</td>
+        <td class="num">${serviceRowInput(row.id, 'pct', row.volumeDiscountPct * 100, 0.5, '%')}</td>
+        <td class="num">${serviceRowInput(row.id, 'value', row.hourlyPay, 100, '$')}</td>
         <td class="num"><strong>${formatCurrency(row.totalPay)}</strong></td>
         <td>${escapeHtml(row.label)}</td>
       </tr>`).join('')}</tbody>
@@ -188,12 +189,14 @@ function dailyPayPanel(sim) {
   </section>`;
 }
 
-function buildDailyPayRows(controls) {
+function buildDailyPayRows(controls, adjustments = {}) {
   return Array.from({ length: 7 }, (_item, index) => {
     const hours = index + 2;
-    const volumeDiscountPct = dailyVolumeDiscount(hours);
+    const id = `daily-${hours}`;
+    const volumeDiscountPct = normalizeServiceDiscount(adjustments[id], dailyVolumeDiscount(hours));
     const hourlyPay = controls.baseHourlyPay * (1 - volumeDiscountPct);
     return {
+      id,
       hours,
       volumeDiscountPct,
       hourlyPay,
@@ -207,8 +210,8 @@ function dailyVolumeDiscount(hours) {
   return Math.max(0, (hours - 2) * 0.02);
 }
 
-function vacationPayPanel(sim) {
-  const rows = buildVacationPayRows(sim.controls);
+function vacationPayPanel(sim, adjustments = {}) {
+  const rows = buildVacationPayRows(sim.controls, adjustments);
   return `<section class="panel salary-ranges-panel salary-vacation-panel">
     <div class="fixed-cost-list-head">
       <div>
@@ -232,29 +235,31 @@ function vacationPayPanel(sim) {
         <td><strong>${escapeHtml(row.label)}</strong><small>${escapeHtml(row.note)}</small></td>
         <td class="num">${row.days}</td>
         <td class="num">${row.hours}</td>
-        <td class="num">${formatPercent(row.volumeDiscountPct)}</td>
-        <td class="num">${formatCurrency(row.hourlyPay)}</td>
+        <td class="num">${serviceRowInput(row.id, 'pct', row.volumeDiscountPct * 100, 0.5, '%')}</td>
+        <td class="num">${serviceRowInput(row.id, 'value', row.hourlyPay, 100, '$')}</td>
         <td class="num"><strong>${formatCurrency(row.totalPay)}</strong></td>
       </tr>`).join('')}</tbody>
     </table></div>
   </section>`;
 }
 
-function buildVacationPayRows(controls) {
+function buildVacationPayRows(controls, adjustments = {}) {
   const dayHours = 4;
   const rows = [
-    ['Por dia', 1, 0, '4 horas en un dia'],
-    ['Semana 4 dias', 4, 0.05, '16 horas en la semana'],
-    ['Semana 5 dias', 5, 0.07, '20 horas en la semana'],
-    ['Dos semanas 4 + 4', 8, 0.1, '32 horas combinadas'],
-    ['Dos semanas 5 + 5', 10, 0.14, '40 horas combinadas'],
-    ['Dos semanas 5 + 4', 9, 0.12, '36 horas combinadas'],
-    ['Dos semanas 4 + 5', 9, 0.12, '36 horas combinadas'],
+    ['vacation-day', 'Por dia', 1, 0, '4 horas en un dia'],
+    ['vacation-week-4', 'Semana 4 dias', 4, 0.05, '16 horas en la semana'],
+    ['vacation-week-5', 'Semana 5 dias', 5, 0.07, '20 horas en la semana'],
+    ['vacation-4-4', 'Dos semanas 4 + 4', 8, 0.1, '32 horas combinadas'],
+    ['vacation-5-5', 'Dos semanas 5 + 5', 10, 0.14, '40 horas combinadas'],
+    ['vacation-5-4', 'Dos semanas 5 + 4', 9, 0.12, '36 horas combinadas'],
+    ['vacation-4-5', 'Dos semanas 4 + 5', 9, 0.12, '36 horas combinadas'],
   ];
-  return rows.map(([label, days, volumeDiscountPct, note]) => {
+  return rows.map(([id, label, days, defaultDiscountPct, note]) => {
     const hours = days * dayHours;
+    const volumeDiscountPct = normalizeServiceDiscount(adjustments[id], defaultDiscountPct);
     const hourlyPay = controls.baseHourlyPay * (1 - volumeDiscountPct);
     return {
+      id,
       label,
       days,
       hours,
@@ -381,18 +386,25 @@ function rowInput(index, name, value, step, suffix = '') {
   return `<span class="salary-row-input-wrap"><input class="table-input" data-salary-row="${index}:${name}" name="row:${index}:${name}" type="number" step="${step}" min="${name.includes('Pct') ? '-80' : '0'}" value="${escapeHtml(String(roundValue(value)))}" />${suffix ? `<em>${escapeHtml(suffix)}</em>` : ''}</span>`;
 }
 
+function serviceRowInput(rowId, field, value, step, suffix = '') {
+  const displayValue = field === 'pct' ? roundRate(value) : roundValue(value);
+  return `<span class="salary-row-input-wrap salary-service-input-wrap"><input class="table-input" data-service-row="${escapeHtml(`${rowId}:${field}`)}" name="service:${rowId}:${field}" type="number" step="${step}" min="0" value="${escapeHtml(String(displayValue))}" />${suffix ? `<em>${escapeHtml(suffix)}</em>` : ''}</span>`;
+}
+
 function readSavedState() {
   const parsed = safeJson(window.localStorage?.getItem(STORAGE_KEY));
   const teacherType = parsed?.teacherType === 'B' ? 'B' : 'A';
   const payView = ['daily', 'vacation'].includes(parsed?.payView) ? parsed.payView : 'weekly';
   const commonControls = normalizeLegacyControls(parsed?.controls || {});
   const teacherControls = normalizeLegacyTeacherControls(teacherType, commonControls, parsed?.controlsByTeacher?.[teacherType] || {});
+  const controls = normalizeSalaryRangeControls({ ...commonControls, ...teacherControls, teacherType });
   return {
     teacherType,
     payView,
-    controls: { ...commonControls, ...teacherControls, teacherType },
+    controls,
     controlsByTeacher: parsed?.controlsByTeacher || {},
     rangesByTeacher: parsed?.rangesByTeacher || migrateLegacyRows(parsed),
+    serviceAdjustmentsByTeacher: parsed?.serviceAdjustmentsByTeacher || {},
   };
 }
 
@@ -414,7 +426,7 @@ function normalizeLegacyTeacherControls(teacherType, commonControls, teacherCont
   return { ...teacherControls, baseHourlyPay: profile.baseHourlyPay };
 }
 
-function saveFromDom(root, nextTeacherType = null, deleteIndex = null, addRange = false, nextPayView = null) {
+function saveFromDom(root, nextTeacherType = null, deleteIndex = null, addRange = false, nextPayView = null, lastEditedName = '') {
   const current = readSavedState();
   const activeTeacherType = root.querySelector('[data-teacher-type].is-active')?.dataset.teacherType || current.teacherType;
   const targetTeacherType = nextTeacherType || activeTeacherType;
@@ -457,12 +469,41 @@ function saveFromDom(root, nextTeacherType = null, deleteIndex = null, addRange 
     ...current.rangesByTeacher,
     [activeTeacherType]: ranges,
   };
+  const hasServiceRows = Boolean(root.querySelector('[data-service-row]'));
+  const serviceAdjustmentsByTeacher = {
+    ...current.serviceAdjustmentsByTeacher,
+  };
+  if (hasServiceRows) {
+    serviceAdjustmentsByTeacher[activeTeacherType] = {
+      ...(serviceAdjustmentsByTeacher[activeTeacherType] || {}),
+      [activePayView]: currentServiceAdjustmentsFromDom(root, activePayView, valueOrCurrent(root, 'baseHourlyPay', current.controls.baseHourlyPay), lastEditedName),
+    };
+  }
   window.localStorage?.setItem(STORAGE_KEY, JSON.stringify({
     teacherType: targetTeacherType,
     payView: targetPayView,
     controls,
     controlsByTeacher,
     rangesByTeacher,
+    serviceAdjustmentsByTeacher,
+  }));
+}
+
+function currentServiceAdjustmentsFromDom(root, payView, baseHourlyPay, lastEditedName) {
+  const definitions = payView === 'vacation'
+    ? buildVacationPayRows({ baseHourlyPay }, {})
+    : buildDailyPayRows({ baseHourlyPay }, {});
+  return Object.fromEntries(definitions.map((row) => {
+    const pctName = `service:${row.id}:pct`;
+    const valueName = `service:${row.id}:value`;
+    const pctInput = root.querySelector(`[name="${CSS.escape(pctName)}"]`);
+    const valueInput = root.querySelector(`[name="${CSS.escape(valueName)}"]`);
+    const pctValue = Number(pctInput?.value || 0) / 100;
+    const hourlyValue = Number(valueInput?.value || 0);
+    const discount = lastEditedName === valueName
+      ? 1 - safeDivideLocal(hourlyValue, baseHourlyPay)
+      : pctValue;
+    return [row.id, normalizeServiceDiscount(discount, row.volumeDiscountPct)];
   }));
 }
 
@@ -526,6 +567,15 @@ function roundValue(value) {
 function roundRate(value) {
   const n = Number(value);
   return Number.isFinite(n) ? Math.round(n * 100) / 100 : value;
+}
+
+function normalizeServiceDiscount(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.max(0, Math.min(0.8, n)) : fallback;
+}
+
+function safeDivideLocal(value, divisor) {
+  return divisor ? value / divisor : 0;
 }
 
 function scheduleSalaryRangesRender(root, focusState) {
