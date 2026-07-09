@@ -20,8 +20,8 @@ export function renderFairPayView(root, focusState = null) {
         <button class="btn btn-secondary" id="salaryRangesReset" type="button">Restaurar base</button>
       </div>
     </section>
-    ${reading(sim)}
-    ${controlPanel(sim.controls)}
+    ${reading(sim, saved.payView)}
+    ${controlPanel(sim.controls, saved.payView)}
     ${isDailyView ? dailyPayPanel(sim) : isVacationView ? vacationPayPanel(sim) : `
       ${legalRulesPanel(sim.controls)}
       ${summaryCards(sim)}
@@ -35,7 +35,7 @@ export function renderFairPayView(root, focusState = null) {
       </div>
       ${salaryRangesTable(sim.rows)}
     </section>`}
-    ${costNotes()}`;
+    ${costNotes(saved.payView)}`;
 
   root.querySelectorAll('[data-salary-control], [data-salary-row]').forEach((input) => {
     input.addEventListener('input', () => {
@@ -105,12 +105,20 @@ function teacherSwitch(activeType) {
   </div>`;
 }
 
-function reading(sim) {
-  const text = `Base actual: ${sim.controls.teacherLabel} usa ${formatCurrency(sim.controls.baseHourlyPay)} como costo final por hora en el rango de 28h. Los demas rangos salen de ese valor y el desglose separa salario, auxilio, aportes, prestaciones y extras.`;
+function reading(sim, payView) {
+  const isServiceView = ['daily', 'vacation'].includes(payView);
+  const text = isServiceView
+    ? `Base actual: ${sim.controls.teacherLabel} usa ${formatCurrency(sim.controls.baseHourlyPay)} como valor hora de prestacion de servicios. No incluye nomina, prestaciones, auxilios ni aportes; solo baja el valor hora cuando aumenta el volumen.`
+    : `Base actual: ${sim.controls.teacherLabel} usa ${formatCurrency(sim.controls.baseHourlyPay)} como costo final por hora en el rango de 28h. Los demas rangos salen de ese valor y el desglose separa salario, auxilio, aportes, prestaciones y extras.`;
   return `<section class="reading healthy"><p>${escapeHtml(text)}</p></section>`;
 }
 
-function controlPanel(controls) {
+function controlPanel(controls, payView) {
+  if (['daily', 'vacation'].includes(payView)) {
+    return `<section class="panel salary-ranges-controls salary-service-controls">
+      ${controlInput('baseHourlyPay', `Valor hora base prestacion ${controls.teacherLabel}`, controls.baseHourlyPay, '$', 100)}
+    </section>`;
+  }
   return `<section class="panel salary-ranges-controls">
     ${controlInput('baseHourlyPay', `Costo final hora base 28h ${controls.teacherLabel}`, controls.baseHourlyPay, '$', 100)}
     ${controlInput('smmlvMonthly', 'SMMLV mensual referencial', controls.smmlvMonthly, '$', 1000)}
@@ -155,7 +163,7 @@ function dailyPayPanel(sim) {
     <div class="fixed-cost-list-head">
       <div>
         <h3>Tabla de pago por jornadas</h3>
-        <p class="muted">Para bloques pagados en un mismo dia. El pago se calcula con la hora base activa de ${escapeHtml(sim.controls.teacherLabel)}.</p>
+        <p class="muted">Prestacion de servicios por bloque. El valor hora parte de la base activa y baja por volumen.</p>
       </div>
       <span class="badge healthy">${escapeHtml(sim.controls.teacherLabel)}</span>
     </div>
@@ -163,15 +171,17 @@ function dailyPayPanel(sim) {
       <thead>
         <tr>
           <th class="num">Horas bloque</th>
+          <th class="num">Ajuste volumen</th>
+          <th class="num">Valor hora final</th>
           <th class="num">Pago jornada</th>
-          <th class="num">Valor hora</th>
           <th>Uso</th>
         </tr>
       </thead>
       <tbody>${rows.map((row) => `<tr>
         <td class="num">${row.hours}</td>
-        <td class="num"><strong>${formatCurrency(row.totalPay)}</strong></td>
+        <td class="num">${formatPercent(row.volumeDiscountPct)}</td>
         <td class="num">${formatCurrency(row.hourlyPay)}</td>
+        <td class="num"><strong>${formatCurrency(row.totalPay)}</strong></td>
         <td>${escapeHtml(row.label)}</td>
       </tr>`).join('')}</tbody>
     </table></div>
@@ -181,13 +191,20 @@ function dailyPayPanel(sim) {
 function buildDailyPayRows(controls) {
   return Array.from({ length: 7 }, (_item, index) => {
     const hours = index + 2;
+    const volumeDiscountPct = dailyVolumeDiscount(hours);
+    const hourlyPay = controls.baseHourlyPay * (1 - volumeDiscountPct);
     return {
       hours,
-      hourlyPay: controls.baseHourlyPay,
-      totalPay: controls.baseHourlyPay * hours,
+      volumeDiscountPct,
+      hourlyPay,
+      totalPay: hourlyPay * hours,
       label: `${hours} horas en una misma jornada`,
     };
   });
+}
+
+function dailyVolumeDiscount(hours) {
+  return Math.max(0, (hours - 2) * 0.02);
 }
 
 function vacationPayPanel(sim) {
@@ -196,7 +213,7 @@ function vacationPayPanel(sim) {
     <div class="fixed-cost-list-head">
       <div>
         <h3>Tabla de pago para vacacionales</h3>
-        <p class="muted">Calcula paquetes de 4 horas por dia, semanas de 4 o 5 dias, y combinaciones de dos semanas.</p>
+        <p class="muted">Prestacion de servicios para paquetes de vacacionales. No suma cargas laborales; aplica descuento por volumen de horas.</p>
       </div>
       <span class="badge healthy">${escapeHtml(sim.controls.teacherLabel)}</span>
     </div>
@@ -206,7 +223,8 @@ function vacationPayPanel(sim) {
           <th>Opcion</th>
           <th class="num">Dias</th>
           <th class="num">Horas</th>
-          <th class="num">Valor hora</th>
+          <th class="num">Ajuste volumen</th>
+          <th class="num">Valor hora final</th>
           <th class="num">Pago total</th>
         </tr>
       </thead>
@@ -214,6 +232,7 @@ function vacationPayPanel(sim) {
         <td><strong>${escapeHtml(row.label)}</strong><small>${escapeHtml(row.note)}</small></td>
         <td class="num">${row.days}</td>
         <td class="num">${row.hours}</td>
+        <td class="num">${formatPercent(row.volumeDiscountPct)}</td>
         <td class="num">${formatCurrency(row.hourlyPay)}</td>
         <td class="num"><strong>${formatCurrency(row.totalPay)}</strong></td>
       </tr>`).join('')}</tbody>
@@ -224,23 +243,25 @@ function vacationPayPanel(sim) {
 function buildVacationPayRows(controls) {
   const dayHours = 4;
   const rows = [
-    ['Por dia', 1, '4 horas en un dia'],
-    ['Semana 4 dias', 4, '16 horas en la semana'],
-    ['Semana 5 dias', 5, '20 horas en la semana'],
-    ['Dos semanas 4 + 4', 8, '32 horas combinadas'],
-    ['Dos semanas 5 + 5', 10, '40 horas combinadas'],
-    ['Dos semanas 5 + 4', 9, '36 horas combinadas'],
-    ['Dos semanas 4 + 5', 9, '36 horas combinadas'],
+    ['Por dia', 1, 0, '4 horas en un dia'],
+    ['Semana 4 dias', 4, 0.05, '16 horas en la semana'],
+    ['Semana 5 dias', 5, 0.07, '20 horas en la semana'],
+    ['Dos semanas 4 + 4', 8, 0.1, '32 horas combinadas'],
+    ['Dos semanas 5 + 5', 10, 0.14, '40 horas combinadas'],
+    ['Dos semanas 5 + 4', 9, 0.12, '36 horas combinadas'],
+    ['Dos semanas 4 + 5', 9, 0.12, '36 horas combinadas'],
   ];
-  return rows.map(([label, days, note]) => {
+  return rows.map(([label, days, volumeDiscountPct, note]) => {
     const hours = days * dayHours;
+    const hourlyPay = controls.baseHourlyPay * (1 - volumeDiscountPct);
     return {
       label,
       days,
       hours,
       note,
-      hourlyPay: controls.baseHourlyPay,
-      totalPay: controls.baseHourlyPay * hours,
+      volumeDiscountPct,
+      hourlyPay,
+      totalPay: hourlyPay * hours,
     };
   });
 }
@@ -288,7 +309,18 @@ function salaryRangesTable(rows) {
   </table></div>`;
 }
 
-function costNotes() {
+function costNotes(payView) {
+  if (['daily', 'vacation'].includes(payView)) {
+    return `<section class="panel salary-cost-notes">
+      <h3>Como leerlo</h3>
+      <div class="exec-quick">
+        <div><span>Prestacion</span><strong>Solo calcula pago por servicios, sin nomina ni cargas legales</strong></div>
+        <div><span>Valor hora base</span><strong>Es el punto de partida manual para ${payView === 'vacation' ? 'vacacionales' : 'jornadas'}</strong></div>
+        <div><span>Volumen</span><strong>A mas horas contratadas, menor valor hora final</strong></div>
+        <div><span>Total</span><strong>Valor hora final multiplicado por las horas del bloque</strong></div>
+      </div>
+    </section>`;
+  }
   return `<section class="panel salary-cost-notes">
     <h3>Como leerlo</h3>
     <div class="exec-quick">
@@ -389,27 +421,27 @@ function saveFromDom(root, nextTeacherType = null, deleteIndex = null, addRange 
   const activePayView = root.querySelector('[data-pay-view].is-active')?.dataset.payView || current.payView;
   const targetPayView = nextPayView || activePayView;
   const controls = {
-    smmlvMonthly: valueOf(root, 'smmlvMonthly'),
-    transportSubsidy: valueOf(root, 'transportSubsidy'),
-    dotationAnnual: valueOf(root, 'dotationAnnual'),
-    medicalExamAnnual: valueOf(root, 'medicalExamAnnual'),
+    smmlvMonthly: valueOrCurrent(root, 'smmlvMonthly', current.controls.smmlvMonthly),
+    transportSubsidy: valueOrCurrent(root, 'transportSubsidy', current.controls.transportSubsidy),
+    dotationAnnual: valueOrCurrent(root, 'dotationAnnual', current.controls.dotationAnnual),
+    medicalExamAnnual: valueOrCurrent(root, 'medicalExamAnnual', current.controls.medicalExamAnnual),
     rates: {
-      employeeHealth: valueOf(root, 'rate:employeeHealth') / 100,
-      employeePension: valueOf(root, 'rate:employeePension') / 100,
-      employerHealth: valueOf(root, 'rate:employerHealth') / 100,
-      employerPension: valueOf(root, 'rate:employerPension') / 100,
-      arl: valueOf(root, 'rate:arl') / 100,
-      compensationFund: valueOf(root, 'rate:compensationFund') / 100,
-      severance: valueOf(root, 'rate:severance') / 100,
-      severanceInterest: valueOf(root, 'rate:severanceInterest') / 100,
-      bonus: valueOf(root, 'rate:bonus') / 100,
-      vacation: valueOf(root, 'rate:vacation') / 100,
+      employeeHealth: valueOrCurrent(root, 'rate:employeeHealth', current.controls.rates.employeeHealth * 100) / 100,
+      employeePension: valueOrCurrent(root, 'rate:employeePension', current.controls.rates.employeePension * 100) / 100,
+      employerHealth: valueOrCurrent(root, 'rate:employerHealth', current.controls.rates.employerHealth * 100) / 100,
+      employerPension: valueOrCurrent(root, 'rate:employerPension', current.controls.rates.employerPension * 100) / 100,
+      arl: valueOrCurrent(root, 'rate:arl', current.controls.rates.arl * 100) / 100,
+      compensationFund: valueOrCurrent(root, 'rate:compensationFund', current.controls.rates.compensationFund * 100) / 100,
+      severance: valueOrCurrent(root, 'rate:severance', current.controls.rates.severance * 100) / 100,
+      severanceInterest: valueOrCurrent(root, 'rate:severanceInterest', current.controls.rates.severanceInterest * 100) / 100,
+      bonus: valueOrCurrent(root, 'rate:bonus', current.controls.rates.bonus * 100) / 100,
+      vacation: valueOrCurrent(root, 'rate:vacation', current.controls.rates.vacation * 100) / 100,
     },
   };
   const controlsByTeacher = {
     ...current.controlsByTeacher,
     [activeTeacherType]: {
-      baseHourlyPay: valueOf(root, 'baseHourlyPay'),
+      baseHourlyPay: valueOrCurrent(root, 'baseHourlyPay', current.controlsByTeacher?.[activeTeacherType]?.baseHourlyPay || current.controls.baseHourlyPay),
     },
   };
   const hasRangeRows = Boolean(root.querySelector('[data-salary-row]'));
@@ -471,6 +503,11 @@ function mergeLegacyRows(teacherType, rows) {
 
 function valueOf(root, name) {
   return Number(root.querySelector(`[name="${CSS.escape(name)}"]`)?.value || 0);
+}
+
+function valueOrCurrent(root, name, currentValue) {
+  const input = root.querySelector(`[name="${CSS.escape(name)}"]`);
+  return input ? Number(input.value || 0) : currentValue;
 }
 
 function safeJson(value) {
