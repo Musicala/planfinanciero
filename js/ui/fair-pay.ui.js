@@ -17,6 +17,7 @@ export function renderFairPayView(root, focusState = null, options = {}) {
   const isDailyView = saved.payView === 'daily';
   const isVacationView = saved.payView === 'vacation';
   const serviceAdjustments = saved.serviceAdjustmentsByTeacher?.[saved.teacherType]?.[saved.payView] || {};
+  const customVacationRows = saved.vacationCustomRowsByTeacher?.[saved.teacherType] || [];
 
   root.innerHTML = `
     <section class="view-head">
@@ -31,7 +32,7 @@ export function renderFairPayView(root, focusState = null, options = {}) {
     </section>
     ${reading(sim, saved.payView)}
     ${controlPanel(sim.controls, saved.payView)}
-    ${isDailyView ? dailyPayPanel(sim, serviceAdjustments) : isVacationView ? vacationPayPanel(sim, serviceAdjustments) : `
+    ${isDailyView ? dailyPayPanel(sim, serviceAdjustments) : isVacationView ? vacationPayPanel(sim, serviceAdjustments, customVacationRows) : `
       ${legalRulesPanel(sim.controls)}
       ${summaryCards(sim)}
       <section class="panel salary-ranges-panel">
@@ -46,7 +47,7 @@ export function renderFairPayView(root, focusState = null, options = {}) {
     </section>`}
     ${costNotes(saved.payView)}`;
 
-  root.querySelectorAll('[data-salary-control], [data-salary-row], [data-service-row]').forEach((input) => {
+  root.querySelectorAll('[data-salary-control], [data-salary-row], [data-service-row], [data-vacation-row]').forEach((input) => {
     input.addEventListener('input', () => {
       saveFromDom(root, options, null, null, false, null, input.name);
       scheduleSalaryRangesRender(root, captureFocus(input));
@@ -80,6 +81,16 @@ export function renderFairPayView(root, focusState = null, options = {}) {
   root.querySelector('#salaryRangeAdd')?.addEventListener('click', () => {
     saveFromDom(root, options, null, null, true);
     renderFairPayView(root, null, options);
+  });
+  root.querySelector('#vacationRowAdd')?.addEventListener('click', () => {
+    saveFromDom(root, options, null, null, false, null, '', true);
+    renderFairPayView(root, null, options);
+  });
+  root.querySelectorAll('[data-delete-vacation-row]').forEach((button) => {
+    button.addEventListener('click', () => {
+      saveFromDom(root, options, null, null, false, null, '', false, button.dataset.deleteVacationRow);
+      renderFairPayView(root, null, options);
+    });
   });
   root.querySelector('#salaryRangesReset')?.addEventListener('click', () => {
     const restored = readSavedState({}, true);
@@ -236,15 +247,15 @@ function dailyVolumeDiscount(hours) {
   return Math.max(0, (hours - 2) * 0.02);
 }
 
-function vacationPayPanel(sim, adjustments = {}) {
-  const rows = buildVacationPayRows(sim.controls, adjustments);
+function vacationPayPanel(sim, adjustments = {}, customRows = []) {
+  const rows = buildVacationPayRows(sim.controls, adjustments, customRows);
   return `<section class="panel salary-ranges-panel salary-vacation-panel">
     <div class="fixed-cost-list-head">
       <div>
         <h3>Tabla de pago para vacacionales</h3>
-        <p class="muted">Prestacion de servicios para paquetes de vacacionales. No suma cargas laborales; aplica descuento por volumen de horas.</p>
+        <p class="muted">Prestacion de servicios para paquetes de vacacionales. Incluye jornadas completas de 4h y medias jornadas de 2h; puedes crear opciones manuales.</p>
       </div>
-      <span class="badge healthy">${escapeHtml(sim.controls.teacherLabel)}</span>
+      <div class="actions"><span class="badge healthy">${escapeHtml(sim.controls.teacherLabel)}</span><button class="btn btn-secondary" id="vacationRowAdd" type="button">+ Opcion manual</button></div>
     </div>
     <div class="table-wrap"><table class="salary-vacation-table">
       <thead>
@@ -255,21 +266,23 @@ function vacationPayPanel(sim, adjustments = {}) {
           <th class="num">Ajuste volumen</th>
           <th class="num">Valor hora final</th>
           <th class="num">Pago total</th>
+          <th></th>
         </tr>
       </thead>
       <tbody>${rows.map((row) => `<tr>
-        <td><strong>${escapeHtml(row.label)}</strong><small>${escapeHtml(row.note)}</small></td>
-        <td class="num">${row.days}</td>
-        <td class="num">${row.hours}</td>
+        <td>${row.custom ? vacationRowInput(row.id, 'label', row.label, 'text') : `<strong>${escapeHtml(row.label)}</strong><small>${escapeHtml(row.note)}</small>`}</td>
+        <td class="num">${row.custom ? vacationRowInput(row.id, 'days', row.days) : row.days}</td>
+        <td class="num">${row.custom ? vacationRowInput(row.id, 'hours', row.hours) : row.hours}</td>
         <td class="num">${serviceRowInput(row.id, 'pct', row.volumeDiscountPct * 100, 0.5, '%')}</td>
         <td class="num">${serviceRowInput(row.id, 'value', row.hourlyPay, 100, '$')}</td>
         <td class="num"><strong>${formatCurrency(row.totalPay)}</strong></td>
+        <td class="num">${row.custom ? `<button class="btn btn-ghost" data-delete-vacation-row="${escapeHtml(row.id)}" type="button">Eliminar</button>` : ''}</td>
       </tr>`).join('')}</tbody>
     </table></div>
   </section>`;
 }
 
-function buildVacationPayRows(controls, adjustments = {}) {
+function buildVacationPayRows(controls, adjustments = {}, customRows = []) {
   const dayHours = 4;
   const rows = [
     ['vacation-day', 'Por dia', 1, 0, '4 horas en un dia'],
@@ -279,6 +292,9 @@ function buildVacationPayRows(controls, adjustments = {}) {
     ['vacation-5-5', 'Dos semanas 5 + 5', 10, 0.14, '40 horas combinadas'],
     ['vacation-5-4', 'Dos semanas 5 + 4', 9, 0.12, '36 horas combinadas'],
     ['vacation-4-5', 'Dos semanas 4 + 5', 9, 0.12, '36 horas combinadas'],
+    ['vacation-half-day', 'Media jornada', 1, 0, '2 horas en un dia', 2],
+    ['vacation-half-week-4', 'Semana media jornada 4 dias', 4, 0.05, '8 horas en la semana', 2],
+    ['vacation-half-week-5', 'Semana media jornada 5 dias', 5, 0.07, '10 horas en la semana', 2],
   ];
   for (let weeks = 3; weeks <= 8; weeks += 1) {
     [4, 5].forEach((daysPerWeek) => {
@@ -293,8 +309,19 @@ function buildVacationPayRows(controls, adjustments = {}) {
       ]);
     });
   }
-  return rows.map(([id, label, days, defaultDiscountPct, note]) => {
-    const hours = days * dayHours;
+  for (let weeks = 2; weeks <= 8; weeks += 1) {
+    const days = weeks * 5;
+    rows.push([
+      `vacation-half-${weeks}-weeks`,
+      `${weeks} semanas media jornada`,
+      days,
+      Math.min(0.8, 0.07 + ((weeks - 1) * 0.04)),
+      `${days} dias · ${days * 2} horas en ${weeks} semanas`,
+      2,
+    ]);
+  }
+  return rows.map(([id, label, days, defaultDiscountPct, note, hoursPerDay = dayHours]) => {
+    const hours = days * hoursPerDay;
     const volumeDiscountPct = normalizeServiceDiscount(adjustments[id], defaultDiscountPct);
     const hourlyPay = controls.baseHourlyPay * (1 - volumeDiscountPct);
     return {
@@ -307,7 +334,13 @@ function buildVacationPayRows(controls, adjustments = {}) {
       hourlyPay,
       totalPay: hourlyPay * hours,
     };
-  }).sort((a, b) => a.hours - b.hours || a.days - b.days || a.label.localeCompare(b.label, 'es'));
+  }).concat(customRows.map((row) => {
+    const days = Math.max(1, Number(row.days) || 1);
+    const hours = Math.max(1, Number(row.hours) || 1);
+    const volumeDiscountPct = normalizeServiceDiscount(adjustments[row.id], 0);
+    const hourlyPay = controls.baseHourlyPay * (1 - volumeDiscountPct);
+    return { id: row.id, label: String(row.label || 'Opcion manual'), days, hours, note: 'Opcion manual editable', custom: true, volumeDiscountPct, hourlyPay, totalPay: hourlyPay * hours };
+  })).sort((a, b) => a.hours - b.hours || a.days - b.days || a.label.localeCompare(b.label, 'es'));
 }
 
 function summaryCards(sim) {
@@ -430,6 +463,12 @@ function serviceRowInput(rowId, field, value, step, suffix = '') {
   return `<span class="salary-row-input-wrap salary-service-input-wrap"><input class="table-input" data-service-row="${escapeHtml(`${rowId}:${field}`)}" name="service:${rowId}:${field}" type="number" step="${step}" min="0" value="${escapeHtml(String(displayValue))}" />${suffix ? `<em>${escapeHtml(suffix)}</em>` : ''}</span>`;
 }
 
+function vacationRowInput(rowId, field, value, type = 'number') {
+  const name = `vacation:${rowId}:${field}`;
+  const safeValue = type === 'number' ? roundValue(value) : String(value || '');
+  return `<input class="table-input" data-vacation-row="${escapeHtml(`${rowId}:${field}`)}" name="${escapeHtml(name)}" type="${type}" ${type === 'number' ? 'min="1" step="1"' : ''} value="${escapeHtml(String(safeValue))}" />`;
+}
+
 function readSavedState(source = null, preferSource = false) {
   const parsed = preferSource ? source : (cachedState || source || safeJson(window.localStorage?.getItem(STORAGE_KEY)));
   const teacherType = parsed?.teacherType === 'B' ? 'B' : 'A';
@@ -444,6 +483,7 @@ function readSavedState(source = null, preferSource = false) {
     controlsByTeacher: parsed?.controlsByTeacher || {},
     rangesByTeacher: parsed?.rangesByTeacher || migrateLegacyRows(parsed),
     serviceAdjustmentsByTeacher: parsed?.serviceAdjustmentsByTeacher || {},
+    vacationCustomRowsByTeacher: parsed?.vacationCustomRowsByTeacher || {},
   };
 }
 
@@ -465,7 +505,7 @@ function normalizeLegacyTeacherControls(teacherType, commonControls, teacherCont
   return { ...teacherControls, baseHourlyPay: profile.baseHourlyPay };
 }
 
-function saveFromDom(root, options, nextTeacherType = null, deleteIndex = null, addRange = false, nextPayView = null, lastEditedName = '') {
+function saveFromDom(root, options, nextTeacherType = null, deleteIndex = null, addRange = false, nextPayView = null, lastEditedName = '', addVacationRow = false, deleteVacationRowId = null) {
   const current = readSavedState(options.savedState);
   const activeTeacherType = root.querySelector('[data-teacher-type].is-active')?.dataset.teacherType || current.teacherType;
   const targetTeacherType = nextTeacherType || activeTeacherType;
@@ -508,6 +548,14 @@ function saveFromDom(root, options, nextTeacherType = null, deleteIndex = null, 
     ...current.rangesByTeacher,
     [activeTeacherType]: ranges,
   };
+  const vacationCustomRowsByTeacher = { ...current.vacationCustomRowsByTeacher };
+  const hasVacationRows = Boolean(root.querySelector('[data-vacation-row]'));
+  let vacationCustomRows = hasVacationRows
+    ? currentVacationRowsFromDom(root)
+    : [...(vacationCustomRowsByTeacher[activeTeacherType] || [])];
+  if (deleteVacationRowId) vacationCustomRows = vacationCustomRows.filter((row) => row.id !== deleteVacationRowId);
+  if (addVacationRow) vacationCustomRows.push({ id: `vacation-manual-${Date.now()}`, label: 'Nueva opcion manual', days: 1, hours: 2 });
+  vacationCustomRowsByTeacher[activeTeacherType] = vacationCustomRows;
   const hasServiceRows = Boolean(root.querySelector('[data-service-row]'));
   const serviceAdjustmentsByTeacher = {
     ...current.serviceAdjustmentsByTeacher,
@@ -515,7 +563,7 @@ function saveFromDom(root, options, nextTeacherType = null, deleteIndex = null, 
   if (hasServiceRows) {
     serviceAdjustmentsByTeacher[activeTeacherType] = {
       ...(serviceAdjustmentsByTeacher[activeTeacherType] || {}),
-      [activePayView]: currentServiceAdjustmentsFromDom(root, activePayView, valueOrCurrent(root, 'baseHourlyPay', current.controls.baseHourlyPay), lastEditedName),
+      [activePayView]: currentServiceAdjustmentsFromDom(root, activePayView, valueOrCurrent(root, 'baseHourlyPay', current.controls.baseHourlyPay), lastEditedName, vacationCustomRows),
     };
   }
   persistLocalState({
@@ -525,7 +573,18 @@ function saveFromDom(root, options, nextTeacherType = null, deleteIndex = null, 
     controlsByTeacher,
     rangesByTeacher,
     serviceAdjustmentsByTeacher,
+    vacationCustomRowsByTeacher,
   }, options);
+}
+
+function currentVacationRowsFromDom(root) {
+  const ids = [...new Set(Array.from(root.querySelectorAll('[data-vacation-row]')).map((input) => input.dataset.vacationRow.split(':')[0]))];
+  return ids.map((id) => ({
+    id,
+    label: String(root.querySelector(`[name="${CSS.escape(`vacation:${id}:label`)}"]`)?.value || 'Opcion manual').trim() || 'Opcion manual',
+    days: Math.max(1, Number(root.querySelector(`[name="${CSS.escape(`vacation:${id}:days`)}"]`)?.value || 1)),
+    hours: Math.max(1, Number(root.querySelector(`[name="${CSS.escape(`vacation:${id}:hours`)}"]`)?.value || 1)),
+  }));
 }
 
 function persistLocalState(nextState) {
@@ -535,9 +594,9 @@ function persistLocalState(nextState) {
   hasUnsavedChanges = true;
 }
 
-function currentServiceAdjustmentsFromDom(root, payView, baseHourlyPay, lastEditedName) {
+function currentServiceAdjustmentsFromDom(root, payView, baseHourlyPay, lastEditedName, vacationCustomRows = []) {
   const definitions = payView === 'vacation'
-    ? buildVacationPayRows({ baseHourlyPay }, {})
+    ? buildVacationPayRows({ baseHourlyPay }, {}, vacationCustomRows)
     : buildDailyPayRows({ baseHourlyPay }, {});
   return Object.fromEntries(definitions.map((row) => {
     const pctName = `service:${row.id}:pct`;
