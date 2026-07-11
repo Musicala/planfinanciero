@@ -4,12 +4,14 @@ import { getTeacherProfile, normalizeRanges, normalizeSalaryRangeControls, simul
 import { showToast } from './toast.ui.js';
 
 const STORAGE_KEY = 'musicala:salary-ranges';
-let migrationStarted = false;
 let cachedState = null;
+let hasUnsavedChanges = false;
 
 export function renderFairPayView(root, focusState = null, options = {}) {
+  if (!cachedState && !options.savedState && safeJson(window.localStorage?.getItem(STORAGE_KEY))) {
+    hasUnsavedChanges = true;
+  }
   const saved = readSavedState(options.savedState);
-  migrateLocalStateIfNeeded(saved, options);
   const activeRanges = saved.rangesByTeacher[saved.teacherType] || [];
   const sim = simulateSalaryRanges({ ...saved.controls, teacherType: saved.teacherType }, activeRanges);
   const isDailyView = saved.payView === 'daily';
@@ -22,6 +24,8 @@ export function renderFairPayView(root, focusState = null, options = {}) {
       <div class="actions">
         ${payViewSwitch(saved.payView)}
         ${teacherSwitch(saved.teacherType)}
+        <span class="muted salary-save-status">${hasUnsavedChanges ? 'Cambios de prueba sin guardar' : 'Guardado en Firebase'}</span>
+        ${options.canWrite ? '<button class="btn btn-primary" id="salaryRangesSave" type="button">Guardar en Firebase</button>' : ''}
         <button class="btn btn-secondary" id="salaryRangesReset" type="button">Restaurar base</button>
       </div>
     </section>
@@ -78,9 +82,26 @@ export function renderFairPayView(root, focusState = null, options = {}) {
     renderFairPayView(root, null, options);
   });
   root.querySelector('#salaryRangesReset')?.addEventListener('click', () => {
-    const restored = readSavedState({});
-    persistState(restored, options);
+    const restored = readSavedState({}, true);
+    persistLocalState(restored);
     renderFairPayView(root, null, { ...options, savedState: restored });
+  });
+  root.querySelector('#salaryRangesSave')?.addEventListener('click', async () => {
+    const button = root.querySelector('#salaryRangesSave');
+    if (!options.onSave || !options.canWrite || button?.disabled) return;
+    button.disabled = true;
+    button.textContent = 'Guardando…';
+    try {
+      await options.onSave(readSavedState());
+      hasUnsavedChanges = false;
+      showToast('Cambios guardados en Firebase. Ya los pueden ver los usuarios con acceso.');
+      renderFairPayView(root, null, options);
+    } catch (error) {
+      console.error('No se pudo guardar la configuracion de pagos en Firebase.', error);
+      showToast('No se pudo guardar en Firebase. Revisa tu conexion o permisos.', 'error');
+      button.disabled = false;
+      button.textContent = 'Guardar en Firebase';
+    }
   });
   restoreFocus(root, focusState);
 }
@@ -396,8 +417,8 @@ function serviceRowInput(rowId, field, value, step, suffix = '') {
   return `<span class="salary-row-input-wrap salary-service-input-wrap"><input class="table-input" data-service-row="${escapeHtml(`${rowId}:${field}`)}" name="service:${rowId}:${field}" type="number" step="${step}" min="0" value="${escapeHtml(String(displayValue))}" />${suffix ? `<em>${escapeHtml(suffix)}</em>` : ''}</span>`;
 }
 
-function readSavedState(source = null) {
-  const parsed = source || cachedState || safeJson(window.localStorage?.getItem(STORAGE_KEY));
+function readSavedState(source = null, preferSource = false) {
+  const parsed = preferSource ? source : (cachedState || source || safeJson(window.localStorage?.getItem(STORAGE_KEY)));
   const teacherType = parsed?.teacherType === 'B' ? 'B' : 'A';
   const payView = ['daily', 'vacation'].includes(parsed?.payView) ? parsed.payView : 'weekly';
   const commonControls = normalizeLegacyControls(parsed?.controls || {});
@@ -484,7 +505,7 @@ function saveFromDom(root, options, nextTeacherType = null, deleteIndex = null, 
       [activePayView]: currentServiceAdjustmentsFromDom(root, activePayView, valueOrCurrent(root, 'baseHourlyPay', current.controls.baseHourlyPay), lastEditedName),
     };
   }
-  persistState({
+  persistLocalState({
     teacherType: targetTeacherType,
     payView: targetPayView,
     controls,
@@ -494,22 +515,11 @@ function saveFromDom(root, options, nextTeacherType = null, deleteIndex = null, 
   }, options);
 }
 
-function persistState(nextState, options = {}) {
-  // Mantiene una copia local solo como respaldo sin conexion; Firebase es la fuente compartida.
+function persistLocalState(nextState) {
+  // Los cambios se conservan para probarlos. Solo el boton explicito los envia a Firebase.
   window.localStorage?.setItem(STORAGE_KEY, JSON.stringify(nextState));
   cachedState = nextState;
-  if (!options.onSave || !options.canWrite) return;
-  Promise.resolve(options.onSave(nextState)).catch((error) => {
-    console.error('No se pudo guardar la configuracion de pagos en Firebase.', error);
-    showToast('No se pudo guardar en Firebase. Revisa tu conexion o permisos.', 'error');
-  });
-}
-
-function migrateLocalStateIfNeeded(state, options = {}) {
-  const hasLocalState = Boolean(safeJson(window.localStorage?.getItem(STORAGE_KEY)));
-  if (options.savedState || !hasLocalState || !options.canWrite || migrationStarted) return;
-  migrationStarted = true;
-  persistState(state, options);
+  hasUnsavedChanges = true;
 }
 
 function currentServiceAdjustmentsFromDom(root, payView, baseHourlyPay, lastEditedName) {
