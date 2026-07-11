@@ -72,6 +72,11 @@ service cloud.firestore {
           allow write: if canAdmin(orgId);
         }
 
+        match /fairPay/{documentId} {
+          allow read: if canReadOrg(orgId);
+          allow write: if canWriteFinance(orgId);
+        }
+
         match /serviceLines/{lineId} {
           allow read: if canReadOrg(orgId);
           allow write: if canWriteFinance(orgId);

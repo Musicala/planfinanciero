@@ -3,6 +3,7 @@ import { DEFAULT_PLAN_ID, ORG_ID, isAllowedEmail, planPath } from '../config/app
 import { getFirebase } from './firebase.service.js';
 import { getCollection, getDocument, planCollection, planDoc, setAt } from './firestore.service.js';
 import { writeAuditLog } from './audit.service.js';
+import { getFairPayState } from './fair-pay.service.js';
 
 export async function getMember(uid) {
   const { db } = getFirebase();
@@ -51,9 +52,10 @@ export async function updateSettings(payload, { before, user, planId = DEFAULT_P
 
 export async function getPlanBundle(planId = DEFAULT_PLAN_ID) {
   const plan = await getFinancialPlan(planId);
-  if (!plan) return { plan: null, settings: {}, serviceLines: [], services: [], fixedCosts: [], scenarios: [], scenarioItems: new Map(), snapshots: new Map(), annualBudget: { budget: null, months: [], cycles: [] }, hiringRoles: [], cashFlowItems: [] };
-  const [settings, serviceLines, services, fixedCosts, scenarios, hiringRoles, cashFlowItems] = await Promise.all([
+  if (!plan) return { plan: null, settings: {}, fairPay: null, serviceLines: [], services: [], fixedCosts: [], scenarios: [], scenarioItems: new Map(), snapshots: new Map(), annualBudget: { budget: null, months: [], cycles: [] }, hiringRoles: [], cashFlowItems: [] };
+  const [settings, fairPay, serviceLines, services, fixedCosts, scenarios, hiringRoles, cashFlowItems] = await Promise.all([
     getSettings(planId),
+    getFairPayState(planId),
     getCollection(planCollection('serviceLines', planId), 'sortOrder'),
     getCollection(planCollection('services', planId), 'name'),
     getCollection(planCollection('fixedCosts', planId), 'category'),
@@ -74,7 +76,7 @@ export async function getPlanBundle(planId = DEFAULT_PLAN_ID) {
   }));
   const { getAnnualBudgetWithMonths } = await import('./annual-budget.service.js');
   const annualBudget = await getAnnualBudgetWithMonths(planId, planId);
-  return { plan, settings, serviceLines, services, fixedCosts, scenarios, scenarioItems, snapshots, annualBudget, hiringRoles, cashFlowItems };
+  return { plan, settings, fairPay, serviceLines, services, fixedCosts, scenarios, scenarioItems, snapshots, annualBudget, hiringRoles, cashFlowItems };
 }
 
 export async function ensureOrganizationAndPlan(user, planId = DEFAULT_PLAN_ID) {

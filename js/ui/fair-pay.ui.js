@@ -1,11 +1,15 @@
 import { escapeHtml } from '../utils/dom.js';
 import { formatCurrency, formatPercent } from '../utils/format.js';
 import { getTeacherProfile, normalizeRanges, normalizeSalaryRangeControls, simulateSalaryRanges } from '../domain/fair-pay.engine.js';
+import { showToast } from './toast.ui.js';
 
 const STORAGE_KEY = 'musicala:salary-ranges';
+let migrationStarted = false;
+let cachedState = null;
 
-export function renderFairPayView(root, focusState = null) {
-  const saved = readSavedState();
+export function renderFairPayView(root, focusState = null, options = {}) {
+  const saved = readSavedState(options.savedState);
+  migrateLocalStateIfNeeded(saved, options);
   const activeRanges = saved.rangesByTeacher[saved.teacherType] || [];
   const sim = simulateSalaryRanges({ ...saved.controls, teacherType: saved.teacherType }, activeRanges);
   const isDailyView = saved.payView === 'daily';
@@ -40,12 +44,12 @@ export function renderFairPayView(root, focusState = null) {
 
   root.querySelectorAll('[data-salary-control], [data-salary-row], [data-service-row]').forEach((input) => {
     input.addEventListener('input', () => {
-      saveFromDom(root, null, null, false, null, input.name);
+      saveFromDom(root, options, null, null, false, null, input.name);
       scheduleSalaryRangesRender(root, captureFocus(input));
     });
     input.addEventListener('change', () => {
-      saveFromDom(root, null, null, false, null, input.name);
-      renderFairPayView(root, captureFocus(input));
+      saveFromDom(root, options, null, null, false, null, input.name);
+      renderFairPayView(root, captureFocus(input), options);
     });
     input.addEventListener('keydown', (event) => {
       if (event.key === 'Enter') input.blur();
@@ -53,29 +57,30 @@ export function renderFairPayView(root, focusState = null) {
   });
   root.querySelectorAll('[data-teacher-type]').forEach((button) => {
     button.addEventListener('click', () => {
-      saveFromDom(root, button.dataset.teacherType);
-      renderFairPayView(root);
+      saveFromDom(root, options, button.dataset.teacherType);
+      renderFairPayView(root, null, options);
     });
   });
   root.querySelectorAll('[data-pay-view]').forEach((button) => {
     button.addEventListener('click', () => {
-      saveFromDom(root, null, null, false, button.dataset.payView);
-      renderFairPayView(root);
+      saveFromDom(root, options, null, null, false, button.dataset.payView);
+      renderFairPayView(root, null, options);
     });
   });
   root.querySelectorAll('[data-delete-range]').forEach((button) => {
     button.addEventListener('click', () => {
-      saveFromDom(root, null, Number(button.dataset.deleteRange));
-      renderFairPayView(root);
+      saveFromDom(root, options, null, Number(button.dataset.deleteRange));
+      renderFairPayView(root, null, options);
     });
   });
   root.querySelector('#salaryRangeAdd')?.addEventListener('click', () => {
-    saveFromDom(root, null, null, true);
-    renderFairPayView(root);
+    saveFromDom(root, options, null, null, true);
+    renderFairPayView(root, null, options);
   });
   root.querySelector('#salaryRangesReset')?.addEventListener('click', () => {
-    window.localStorage?.removeItem(STORAGE_KEY);
-    renderFairPayView(root);
+    const restored = readSavedState({});
+    persistState(restored, options);
+    renderFairPayView(root, null, { ...options, savedState: restored });
   });
   restoreFocus(root, focusState);
 }
@@ -391,8 +396,8 @@ function serviceRowInput(rowId, field, value, step, suffix = '') {
   return `<span class="salary-row-input-wrap salary-service-input-wrap"><input class="table-input" data-service-row="${escapeHtml(`${rowId}:${field}`)}" name="service:${rowId}:${field}" type="number" step="${step}" min="0" value="${escapeHtml(String(displayValue))}" />${suffix ? `<em>${escapeHtml(suffix)}</em>` : ''}</span>`;
 }
 
-function readSavedState() {
-  const parsed = safeJson(window.localStorage?.getItem(STORAGE_KEY));
+function readSavedState(source = null) {
+  const parsed = source || cachedState || safeJson(window.localStorage?.getItem(STORAGE_KEY));
   const teacherType = parsed?.teacherType === 'B' ? 'B' : 'A';
   const payView = ['daily', 'vacation'].includes(parsed?.payView) ? parsed.payView : 'weekly';
   const commonControls = normalizeLegacyControls(parsed?.controls || {});
@@ -426,8 +431,8 @@ function normalizeLegacyTeacherControls(teacherType, commonControls, teacherCont
   return { ...teacherControls, baseHourlyPay: profile.baseHourlyPay };
 }
 
-function saveFromDom(root, nextTeacherType = null, deleteIndex = null, addRange = false, nextPayView = null, lastEditedName = '') {
-  const current = readSavedState();
+function saveFromDom(root, options, nextTeacherType = null, deleteIndex = null, addRange = false, nextPayView = null, lastEditedName = '') {
+  const current = readSavedState(options.savedState);
   const activeTeacherType = root.querySelector('[data-teacher-type].is-active')?.dataset.teacherType || current.teacherType;
   const targetTeacherType = nextTeacherType || activeTeacherType;
   const activePayView = root.querySelector('[data-pay-view].is-active')?.dataset.payView || current.payView;
@@ -479,14 +484,32 @@ function saveFromDom(root, nextTeacherType = null, deleteIndex = null, addRange 
       [activePayView]: currentServiceAdjustmentsFromDom(root, activePayView, valueOrCurrent(root, 'baseHourlyPay', current.controls.baseHourlyPay), lastEditedName),
     };
   }
-  window.localStorage?.setItem(STORAGE_KEY, JSON.stringify({
+  persistState({
     teacherType: targetTeacherType,
     payView: targetPayView,
     controls,
     controlsByTeacher,
     rangesByTeacher,
     serviceAdjustmentsByTeacher,
-  }));
+  }, options);
+}
+
+function persistState(nextState, options = {}) {
+  // Mantiene una copia local solo como respaldo sin conexion; Firebase es la fuente compartida.
+  window.localStorage?.setItem(STORAGE_KEY, JSON.stringify(nextState));
+  cachedState = nextState;
+  if (!options.onSave || !options.canWrite) return;
+  Promise.resolve(options.onSave(nextState)).catch((error) => {
+    console.error('No se pudo guardar la configuracion de pagos en Firebase.', error);
+    showToast('No se pudo guardar en Firebase. Revisa tu conexion o permisos.', 'error');
+  });
+}
+
+function migrateLocalStateIfNeeded(state, options = {}) {
+  const hasLocalState = Boolean(safeJson(window.localStorage?.getItem(STORAGE_KEY)));
+  if (options.savedState || !hasLocalState || !options.canWrite || migrationStarted) return;
+  migrationStarted = true;
+  persistState(state, options);
 }
 
 function currentServiceAdjustmentsFromDom(root, payView, baseHourlyPay, lastEditedName) {

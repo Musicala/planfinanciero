@@ -31,6 +31,7 @@ import { annualCycleModalContent, annualMonthModalContent, readAnnualCycleForm, 
 import { formModal } from './js/ui/forms.ui.js';
 import { confirmModal, closeModal, openModal } from './js/ui/modals.ui.js';
 import { showToast } from './js/ui/toast.ui.js';
+import { saveFairPayState } from './js/services/fair-pay.service.js';
 
 const app = $('#app');
 
@@ -53,7 +54,7 @@ observeAuth({
 });
 
 function emptyBundle() {
-  return { plan: null, settings: normalizeSettings({}), serviceLines: [], services: [], fixedCosts: [], scenarios: [], scenarioItems: new Map(), snapshots: new Map(), annualBudget: { budget: null, months: [], cycles: [] }, hiringRoles: [], cashFlowItems: [] };
+  return { plan: null, settings: normalizeSettings({}), fairPay: null, serviceLines: [], services: [], fixedCosts: [], scenarios: [], scenarioItems: new Map(), snapshots: new Map(), annualBudget: { budget: null, months: [], cycles: [] }, hiringRoles: [], cashFlowItems: [] };
 }
 
 async function bootAuthenticated() {
@@ -212,7 +213,14 @@ function renderRoute() {
   else if (state.route === 'scenarios') renderScenariosView(main, ctx);
   else if (state.route === 'scenario-detail') renderScenarioDetailView(main, ctx);
   else if (state.route === 'profitability') renderProfitabilityView(main, ctx);
-  else if (state.route === 'fair-pay') renderFairPayView(main, ctx);
+  else if (state.route === 'fair-pay') renderFairPayView(main, ctx, {
+    savedState: state.bundle.fairPay,
+    canWrite: canWrite(),
+    onSave: async (fairPay) => {
+      await saveFairPayState(fairPay, { user: state.user });
+      state.bundle.fairPay = fairPay;
+    },
+  });
   else if (state.route === 'break-even') renderBreakEvenView(main, ctx);
   else if (state.route === 'risk') renderRiskView(main, ctx);
   else if (state.route === 'hiring') renderHiringView(main, ctx);
