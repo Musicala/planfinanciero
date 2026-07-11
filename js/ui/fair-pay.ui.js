@@ -280,6 +280,19 @@ function buildVacationPayRows(controls, adjustments = {}) {
     ['vacation-5-4', 'Dos semanas 5 + 4', 9, 0.12, '36 horas combinadas'],
     ['vacation-4-5', 'Dos semanas 4 + 5', 9, 0.12, '36 horas combinadas'],
   ];
+  for (let weeks = 3; weeks <= 8; weeks += 1) {
+    [4, 5].forEach((daysPerWeek) => {
+      const days = weeks * daysPerWeek;
+      const defaultDiscountPct = Math.min(0.8, 0.1 + ((weeks - 2) * 0.05) + (daysPerWeek === 5 ? 0.04 : 0));
+      rows.push([
+        `vacation-${weeks}-weeks-${daysPerWeek}-days`,
+        `${weeks} semanas · ${daysPerWeek} dias/semana`,
+        days,
+        defaultDiscountPct,
+        `${days} dias · ${days * dayHours} horas en ${weeks} semanas`,
+      ]);
+    });
+  }
   return rows.map(([id, label, days, defaultDiscountPct, note]) => {
     const hours = days * dayHours;
     const volumeDiscountPct = normalizeServiceDiscount(adjustments[id], defaultDiscountPct);
@@ -294,7 +307,7 @@ function buildVacationPayRows(controls, adjustments = {}) {
       hourlyPay,
       totalPay: hourlyPay * hours,
     };
-  });
+  }).sort((a, b) => a.hours - b.hours || a.days - b.days || a.label.localeCompare(b.label, 'es'));
 }
 
 function summaryCards(sim) {
