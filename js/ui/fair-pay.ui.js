@@ -43,14 +43,14 @@ export function renderFairPayView(root, focusState = null, options = {}) {
         </div>
         <button class="btn btn-primary" id="salaryRangeAdd" type="button">+ Rango</button>
       </div>
-      ${salaryRangesTable(sim.rows)}
+      ${salaryRangesTable(sim.rows, sim.controls.partialContract)}
     </section>`}
     ${costNotes(saved.payView)}`;
 
   root.querySelectorAll('[data-salary-control], [data-salary-row], [data-service-row], [data-vacation-row]').forEach((input) => {
     input.addEventListener('input', () => {
       saveFromDom(root, options, null, null, false, null, input.name);
-      scheduleSalaryRangesRender(root, captureFocus(input));
+      scheduleSalaryRangesRender(root, captureFocus(input), options);
     });
     input.addEventListener('change', () => {
       saveFromDom(root, options, null, null, false, null, input.name);
@@ -145,10 +145,20 @@ function teacherSwitch(activeType) {
 
 function reading(sim, payView) {
   const isServiceView = ['daily', 'vacation'].includes(payView);
-  const text = isServiceView
-    ? `Base actual: ${sim.controls.teacherLabel} usa ${formatCurrency(sim.controls.baseHourlyPay)} como valor hora de prestacion de servicios. No incluye nomina, prestaciones, auxilios ni aportes; solo baja el valor hora cuando aumenta el volumen.`
-    : `Base actual: ${sim.controls.teacherLabel} usa ${formatCurrency(sim.controls.baseHourlyPay)} como costo final por hora en el rango de 28h. Los demas rangos salen de ese valor y el desglose separa salario, auxilio, aportes, prestaciones y extras.`;
-  return `<section class="reading healthy"><p>${escapeHtml(text)}</p></section>`;
+  if (isServiceView) {
+    const text = `Base actual: ${sim.controls.teacherLabel} usa ${formatCurrency(sim.controls.baseHourlyPay)} como valor hora de prestacion de servicios. No incluye nomina, prestaciones, auxilios ni aportes; solo baja el valor hora cuando aumenta el volumen.`;
+    return `<section class="reading healthy"><p>${escapeHtml(text)}</p></section>`;
+  }
+  const text = `Base actual: ${sim.controls.teacherLabel} usa ${formatCurrency(sim.controls.baseHourlyPay)} como costo final por hora en el rango de 28h. La columna Pago neto docente muestra lo que le queda al docente en el banco cada mes.`;
+  if (!sim.controls.partialContract) {
+    return `<section class="reading healthy"><p>${escapeHtml(text)}</p></section>`;
+  }
+  const partialText = `${text} Contrato parcial activo sobre una jornada plena de ${sim.controls.fullTimeWeeklyHours} h/semana: el minimo legal, el piso de aportes y el auxilio de transporte se prorratean por la fraccion de jornada de cada rango.`;
+  const tone = sim.summary.rangesBelowMinimum ? 'risky' : 'healthy';
+  const alert = sim.summary.rangesBelowMinimum
+    ? ` Hay ${sim.summary.rangesBelowMinimum} rango(s) con salario por debajo del minimo proporcional: sube el % de pago de esas filas o el costo hora base.`
+    : '';
+  return `<section class="reading ${tone}"><p>${escapeHtml(partialText + alert)}</p></section>`;
 }
 
 function controlPanel(controls, payView) {
@@ -163,6 +173,8 @@ function controlPanel(controls, payView) {
     ${controlInput('transportSubsidy', 'Auxilio transporte', controls.transportSubsidy, '$', 1000)}
     ${controlInput('dotationAnnual', 'Dotacion anual', controls.dotationAnnual, '$', 1000)}
     ${controlInput('medicalExamAnnual', 'Examenes medicos anual', controls.medicalExamAnnual, '$', 1000)}
+    ${toggleInput('partialContract', 'Contrato parcial', controls.partialContract, 'Prorratea minimo, aportes y auxilio')}
+    ${controlInput('fullTimeWeeklyHours', 'Jornada plena (h/semana)', controls.fullTimeWeeklyHours, 'h', 1)}
   </section>`;
 }
 
@@ -172,13 +184,15 @@ function legalRulesPanel(controls) {
     <div class="fixed-cost-list-head">
       <div>
         <h3>Reglas legales y supuestos</h3>
-        <p class="muted">La base de aportes se toma como el mayor valor entre salario base y SMMLV. Los porcentajes quedan editables para revisar cambios normativos o ARL.</p>
+        <p class="muted">${controls.partialContract
+          ? `Contrato parcial: el piso de aportes y el minimo legal se prorratean por horas del rango sobre ${controls.fullTimeWeeklyHours} h/semana. Confirma con tu contador antes de usarlo en una oferta real.`
+          : 'La base de aportes se toma como el mayor valor entre salario base y SMMLV. Los porcentajes quedan editables para revisar cambios normativos o ARL.'}</p>
       </div>
     </div>
     <div class="salary-rule-summary">
-      <div><span>Base minima aportes</span><strong>max(salario base, SMMLV)</strong></div>
+      <div><span>Base minima aportes</span><strong>${controls.partialContract ? 'max(salario base, SMMLV x % jornada)' : 'max(salario base, SMMLV)'}</strong></div>
       <div><span>Prestaciones</span><strong>sobre salario base del rango</strong></div>
-      <div><span>Auxilio, dotacion y examenes</span><strong>valores mensuales/anuales configurables</strong></div>
+      <div><span>Auxilio transporte</span><strong>${controls.partialContract ? 'proporcional a la jornada del rango' : 'valor mensual completo'}</strong></div>
     </div>
     <div class="salary-rule-grid">
       ${rate('employeeHealth', 'Salud empleado')}
@@ -345,41 +359,52 @@ function buildVacationPayRows(controls, adjustments = {}, customRows = []) {
 
 function summaryCards(sim) {
   const items = [
+    ['Pago neto prom.', formatCurrency(sim.summary.averageNetPay), 'Lo que recibe el docente en el banco'],
     ['Salario base prom.', formatCurrency(sim.summary.averageSalary), 'Despues de reservar costos laborales'],
     ['Costo empresa prom.', formatCurrency(sim.summary.averageCompanyCost), 'Promedio simple de rangos'],
-    ['Rangos semanales', String(sim.summary.reviewedRanges), 'Puedes agregar o quitar jornadas'],
+    ['Rangos semanales', String(sim.summary.reviewedRanges), sim.controls.partialContract
+      ? `${sim.summary.rangesBelowMinimum} bajo el minimo proporcional`
+      : 'Puedes agregar o quitar jornadas'],
     ['Costo final 28h', formatCurrency(sim.controls.baseHourlyPay), sim.controls.teacherLabel],
   ];
   return `<section class="kpi-grid salary-ranges-kpis">${items.map(([label, value, sub]) => `<article class="metric-card"><span>${label}</span><strong>${value}</strong><small>${sub}</small></article>`).join('')}</section>`;
 }
 
-function salaryRangesTable(rows) {
+function salaryRangesTable(rows, isPartial = false) {
   return `<div class="table-wrap"><table class="salary-ranges-table">
     <thead>
       <tr>
         <th class="num">Horas sem.</th>
         <th class="num">Equiv. mes</th>
+        ${isPartial ? '<th class="num">% jornada</th><th class="num">Minimo legal</th>' : ''}
         <th class="num">% pago rango</th>
         <th class="num">Costo final/hora</th>
         <th class="num">Salario base</th>
+        <th class="num salary-net-col">Pago neto docente</th>
+        <th class="num">Neto/hora</th>
         <th class="num">Costo real empresa</th>
         <th class="num">Costo/hora</th>
         <th>Desglose</th>
         <th class="num">Dif. salario</th>
+        <th class="num salary-net-col">Dif. neto</th>
         <th class="num">Dif. costo</th>
         <th></th>
       </tr>
     </thead>
-    <tbody>${rows.map((row, index) => `<tr>
+    <tbody>${rows.map((row, index) => `<tr class="${isPartial && row.belowLegalMinimum ? 'is-below-minimum' : ''}">
       <td class="num">${rowInput(index, 'weeklyHours', row.weeklyHours, 1)}</td>
       <td class="num">${row.monthlyHours}</td>
+      ${isPartial ? `<td class="num">${formatPercent(row.workdayFactor)}</td><td class="num">${formatCurrency(row.legalMinimumSalary)}</td>` : ''}
       <td class="num">${rowInput(index, 'payAdjustmentPct', Math.round(row.payAdjustmentPct * 100), 1, '%')}</td>
       <td class="num">${formatCurrency(row.hourlyPay)}</td>
-      <td class="num">${formatCurrency(row.salary)}</td>
+      <td class="num">${formatCurrency(row.salary)}${isPartial && row.belowLegalMinimum ? '<small class="salary-alert">Bajo el minimo</small>' : ''}</td>
+      <td class="num salary-net-col"><strong>${formatCurrency(row.netPay)}</strong></td>
+      <td class="num">${formatCurrency(row.netPayPerHour)}</td>
       <td class="num">${formatCurrency(row.companyCost)}</td>
       <td class="num">${formatCurrency(row.companyCostPerHour)}</td>
       <td>${breakdownDetails(row)}</td>
       <td class="num">${row.salaryDifference == null ? 'Base' : formatCurrency(row.salaryDifference)}</td>
+      <td class="num salary-net-col">${row.netPayDifference == null ? 'Base' : formatCurrency(row.netPayDifference)}</td>
       <td class="num">${row.costDifference == null ? 'Base' : formatCurrency(row.costDifference)}</td>
       <td class="num"><button class="btn btn-ghost" data-delete-range="${index}" type="button">Eliminar</button></td>
     </tr>`).join('')}</tbody>
@@ -403,7 +428,7 @@ function costNotes(payView) {
     <div class="exec-quick">
       <div><span>Horas semanales</span><strong>Unidad principal para crear y comparar rangos</strong></div>
       <div><span>Base manual</span><strong>El rango 28h define el costo final por hora</strong></div>
-      <div><span>Diferenciales</span><strong>Comparan salario y costo contra el rango anterior</strong></div>
+      <div><span>Pago neto docente</span><strong>Salario + auxilio - salud y pension del empleado; es lo que recibe en el banco</strong></div>
       <div><span>Costos</span><strong>Auxilio, aportes, prestaciones, dotacion y examenes</strong></div>
     </div>
   </section>`;
@@ -440,6 +465,16 @@ function controlInput(name, label, value, suffix, step) {
     <div class="fair-pay-input-wrap">
       <input data-salary-control="${name}" name="${name}" type="number" step="${step}" min="0" value="${escapeHtml(String(roundValue(value)))}" />
       <em>${escapeHtml(suffix)}</em>
+    </div>
+  </label>`;
+}
+
+function toggleInput(name, label, checked, hint) {
+  return `<label class="field salary-range-field salary-toggle-field">
+    <span>${escapeHtml(label)}</span>
+    <div class="fair-pay-toggle-wrap">
+      <input data-salary-control="${name}" name="${name}" type="checkbox" ${checked ? 'checked' : ''} />
+      <em>${escapeHtml(hint)}</em>
     </div>
   </label>`;
 }
@@ -512,6 +547,8 @@ function saveFromDom(root, options, nextTeacherType = null, deleteIndex = null, 
   const activePayView = root.querySelector('[data-pay-view].is-active')?.dataset.payView || current.payView;
   const targetPayView = nextPayView || activePayView;
   const controls = {
+    partialContract: checkedOrCurrent(root, 'partialContract', current.controls.partialContract),
+    fullTimeWeeklyHours: valueOrCurrent(root, 'fullTimeWeeklyHours', current.controls.fullTimeWeeklyHours),
     smmlvMonthly: valueOrCurrent(root, 'smmlvMonthly', current.controls.smmlvMonthly),
     transportSubsidy: valueOrCurrent(root, 'transportSubsidy', current.controls.transportSubsidy),
     dotationAnnual: valueOrCurrent(root, 'dotationAnnual', current.controls.dotationAnnual),
@@ -656,6 +693,11 @@ function valueOrCurrent(root, name, currentValue) {
   return input ? Number(input.value || 0) : currentValue;
 }
 
+function checkedOrCurrent(root, name, currentValue) {
+  const input = root.querySelector(`[name="${CSS.escape(name)}"]`);
+  return input ? input.checked : Boolean(currentValue);
+}
+
 function safeJson(value) {
   try {
     return value ? JSON.parse(value) : null;
@@ -683,10 +725,10 @@ function safeDivideLocal(value, divisor) {
   return divisor ? value / divisor : 0;
 }
 
-function scheduleSalaryRangesRender(root, focusState) {
+function scheduleSalaryRangesRender(root, focusState, options = {}) {
   window.clearTimeout(root.__salaryRangesRenderTimer);
   root.__salaryRangesRenderTimer = window.setTimeout(() => {
-    renderFairPayView(root, focusState);
+    renderFairPayView(root, focusState, options);
   }, 350);
 }
 

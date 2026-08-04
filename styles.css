@@ -245,10 +245,17 @@ tr:hover td { background: #fbfcff; }
 .salary-view-switch { align-self: stretch; }
 .salary-view-switch button { min-width: 118px; text-align: center; }
 .salary-range-field input { width: 100%; min-width: 0; }
-.salary-ranges-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.salary-ranges-kpis { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .salary-ranges-panel { padding: 0; overflow: hidden; }
 .salary-ranges-panel .fixed-cost-list-head { border: 0; border-bottom: 1px solid var(--line); }
-.salary-ranges-table { min-width: 1880px; }
+.salary-ranges-table { min-width: 2240px; }
+.salary-ranges-table .salary-net-col { background: #f2f7ff; }
+.salary-ranges-table td.salary-net-col strong { color: var(--blue); font-size: 15px; }
+.salary-ranges-table tr.is-below-minimum { background: #fff7e8; }
+.salary-alert { display: block; color: var(--warn); font-size: 11px; font-weight: 900; margin-top: 3px; }
+.fair-pay-toggle-wrap { display: flex; align-items: center; gap: 9px; border: 1px solid var(--line); border-radius: 8px; padding: 10px 11px; background: white; }
+.fair-pay-toggle-wrap input { min-width: auto; width: 18px; height: 18px; accent-color: var(--blue); }
+.fair-pay-toggle-wrap em { color: var(--muted); font-style: normal; font-size: 12px; font-weight: 800; }
 .salary-daily-table { min-width: 820px; }
 .salary-daily-table strong { color: var(--blue); font-size: 16px; }
 .salary-vacation-table { min-width: 960px; }

@@ -2,6 +2,8 @@ import { safeDivide, toNumber } from '../utils/numbers.js';
 
 export const SALARY_RANGE_DEFAULTS = {
   teacherType: 'A',
+  partialContract: false,
+  fullTimeWeeklyHours: 42,
   smmlvMonthly: 1750905,
   transportSubsidy: 249095,
   dotationAnnual: 126950,
@@ -65,10 +67,12 @@ export function simulateSalaryRanges(controls = {}, rangesInput = []) {
     return {
       ...row,
       salaryDifference: previous ? row.salary - previous.salary : null,
+      netPayDifference: previous ? row.netPay - previous.netPay : null,
       costDifference: previous ? row.companyCost - previous.companyCost : null,
     };
   });
   const averageSalary = safeDivide(rowsWithDifferentials.reduce((sum, row) => sum + row.salary, 0), rowsWithDifferentials.length);
+  const averageNetPay = safeDivide(rowsWithDifferentials.reduce((sum, row) => sum + row.netPay, 0), rowsWithDifferentials.length);
   const averageCompanyCost = safeDivide(rowsWithDifferentials.reduce((sum, row) => sum + row.companyCost, 0), rowsWithDifferentials.length);
 
   return {
@@ -77,7 +81,9 @@ export function simulateSalaryRanges(controls = {}, rangesInput = []) {
     summary: {
       reviewedRanges: rowsWithDifferentials.length,
       averageSalary,
+      averageNetPay,
       averageCompanyCost,
+      rangesBelowMinimum: rowsWithDifferentials.filter((row) => row.belowLegalMinimum).length,
     },
   };
 }
@@ -88,6 +94,8 @@ export function normalizeSalaryRangeControls(controls = {}) {
   return {
     teacherType,
     teacherLabel: profile.label,
+    partialContract: Boolean(controls.partialContract),
+    fullTimeWeeklyHours: clamp(toNumber(controls.fullTimeWeeklyHours, SALARY_RANGE_DEFAULTS.fullTimeWeeklyHours), 1, 60),
     smmlvMonthly: Math.max(0, toNumber(controls.smmlvMonthly, SALARY_RANGE_DEFAULTS.smmlvMonthly)),
     baseHourlyPay: Math.max(0, toNumber(controls.baseHourlyPay, profile.baseHourlyPay)),
     transportSubsidy: Math.max(0, toNumber(controls.transportSubsidy, SALARY_RANGE_DEFAULTS.transportSubsidy)),
@@ -113,10 +121,11 @@ export function normalizeRanges(rangesInput = [], teacherType = SALARY_RANGE_DEF
 
 function buildSalaryRangeRow(range, controls) {
   const monthlyHours = range.weeklyHours * 4;
+  const context = rangeContext(range, controls);
   const finalHourlyCost = controls.baseHourlyPay * (1 - range.payAdjustmentPct);
   const targetCompanyCost = Math.max(0, finalHourlyCost * monthlyHours);
-  const salary = grossSalaryFromCompanyCost(targetCompanyCost, controls);
-  const costs = laborCosts(salary, controls);
+  const salary = grossSalaryFromCompanyCost(targetCompanyCost, controls, context);
+  const costs = laborCosts(salary, controls, context);
 
   return {
     weeklyHours: range.weeklyHours,
@@ -129,22 +138,42 @@ function buildSalaryRangeRow(range, controls) {
     salaryHourlyPay: safeDivide(salary, monthlyHours),
     salary,
     ...costs,
+    workdayFactor: context.workdayFactor,
+    legalMinimumSalary: context.legalMinimumSalary,
+    belowLegalMinimum: salary + 1 < context.legalMinimumSalary,
     targetCompanyCost,
     companyCostPerHour: safeDivide(costs.companyCost, monthlyHours),
+    netPayPerHour: safeDivide(costs.netPay, monthlyHours),
   };
 }
 
-function grossSalaryFromCompanyCost(companyCost, controls) {
+// En contrato parcial el minimo legal, el piso de aportes y el auxilio de transporte
+// se prorratean segun la fraccion de jornada contratada. En contrato pleno el factor es 1
+// y todo se comporta igual que antes.
+function rangeContext(range, controls) {
+  const workdayFactor = controls.partialContract
+    ? Math.max(0, Math.min(1, safeDivide(range.weeklyHours, controls.fullTimeWeeklyHours)))
+    : 1;
+  return {
+    workdayFactor,
+    legalMinimumSalary: controls.smmlvMonthly * workdayFactor,
+    contributionFloor: controls.smmlvMonthly * workdayFactor,
+    transportSubsidy: controls.transportSubsidy * workdayFactor,
+  };
+}
+
+function grossSalaryFromCompanyCost(companyCost, controls, context) {
   const rates = controls.rates;
-  const fixedMonthlyCosts = controls.transportSubsidy
+  const fixedMonthlyCosts = context.transportSubsidy
     + safeDivide(controls.dotationAnnual, 12)
     + safeDivide(controls.medicalExamAnnual, 12);
   const employerContributionRate = rates.employerHealth + rates.employerPension + rates.arl + rates.compensationFund;
   const benefitsFactor = rates.severance + rates.severanceInterest + rates.bonus + rates.vacation;
   const salaryWhenIbcIsMinimum = companyCost
     - fixedMonthlyCosts
-    - (controls.smmlvMonthly * employerContributionRate);
-  if (salaryWhenIbcIsMinimum <= controls.smmlvMonthly) {
+    - (context.contributionFloor * employerContributionRate);
+  // El salario resultante -no el numerador- es el que define si el IBC queda en el piso.
+  if (salaryWhenIbcIsMinimum <= context.contributionFloor * (1 + benefitsFactor)) {
     return Math.max(0, safeDivide(salaryWhenIbcIsMinimum, 1 + benefitsFactor));
   }
   const variableFactor = 1
@@ -159,10 +188,10 @@ function grossSalaryFromCompanyCost(companyCost, controls) {
   return Math.max(0, safeDivide(companyCost - fixedMonthlyCosts, variableFactor));
 }
 
-function laborCosts(salary, controls) {
+function laborCosts(salary, controls, context) {
   const rates = controls.rates;
-  const transportSubsidy = controls.transportSubsidy;
-  const contributionBase = Math.max(salary, controls.smmlvMonthly);
+  const transportSubsidy = context.transportSubsidy;
+  const contributionBase = Math.max(salary, context.contributionFloor);
   const employeeHealth = contributionBase * rates.employeeHealth;
   const employeePension = contributionBase * rates.employeePension;
   const netPay = salary + transportSubsidy - employeeHealth - employeePension;
